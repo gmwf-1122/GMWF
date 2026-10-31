@@ -11,8 +11,6 @@
 //   AppCard(padding: EdgeInsets.all(Gsp.sp6), child: ...) // custom padding
 // ─────────────────────────────────────────────────────────────────────────────
 
-import 'dart:ui';
-import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import '../../theme/role_theme_provider.dart' show RoleThemeScope;
 import '../tokens/spacing.dart';
@@ -121,34 +119,28 @@ class AppCard extends StatelessWidget {
         );
 
       case AppCardVariant.glass:
-        body = ClipRRect(
-          borderRadius: r,
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              decoration: BoxDecoration(
-                color: t.glassTint,
-                borderRadius: r,
-                border: Border.all(
-                  color: SoftPalette.gray50.withValues(alpha: isDark ? 0.08 : 0.30),
-                  width: 1,
-                ),
-                boxShadow: elevation == 0
-                    ? GShadow.s0
-                    : GShadow.s3(isDark, t.accent),
-              ),
-              child: Material(
-                color: Colors.transparent,
-                borderRadius: r,
-                child: onTap != null
-                    ? InkWell(
-                        onTap: onTap,
-                        borderRadius: r,
-                        child: Padding(padding: pad, child: child),
-                      )
-                    : Padding(padding: pad, child: child),
-              ),
+        body = Container(
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF27272A) : const Color(0xFFF8FAFC),
+            borderRadius: r,
+            border: Border.all(
+              color: isDark ? const Color(0xFF3F3F46) : const Color(0xFFE2E8F0),
+              width: 1,
             ),
+            boxShadow: elevation == 0
+                ? GShadow.s0
+                : GShadow.s3(isDark, t.accent),
+          ),
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: r,
+            child: onTap != null
+                ? InkWell(
+                    onTap: onTap,
+                    borderRadius: r,
+                    child: Padding(padding: pad, child: child),
+                  )
+                : Padding(padding: pad, child: child),
           ),
         );
     }

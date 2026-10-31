@@ -8,6 +8,7 @@
 // • Saves original data in editHistory array on the record
 // • Updates Firestore + local storage atomically
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:gmwf/design/tokens/comfort_colors.dart';
@@ -210,10 +211,17 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
           ..remove('firestoreId')
           ..remove('editHistory');
 
-        await docRef.set({
-          ...fullMap,
-          'editHistory': FieldValue.arrayUnion([editEntry]),
-        }, SetOptions(merge: true));
+        // Firestore write futures only complete on server ack, so offline this
+        // would hang the dialog and the local save below would never run. The
+        // SDK keeps the write queued; updateDonationField also queues it.
+        try {
+          await docRef.set({
+            ...fullMap,
+            'editHistory': FieldValue.arrayUnion([editEntry]),
+          }, SetOptions(merge: true)).timeout(const Duration(seconds: 6));
+        } on TimeoutException {
+          debugPrint('[EditDonation] cloud write pending (offline), saving locally');
+        }
       }
 
       // ── Local Hive update ───────────────────────────────────────────────

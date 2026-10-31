@@ -548,6 +548,8 @@ class DonationBoxStorage {
 
     final String? outputFile = await FilePicker.platform.saveFile(
       dialogTitle: 'Save Box Yearly Report',
+      // Android, iOS and web require the bytes and write the file themselves.
+      bytes: Uint8List.fromList(bytes),
       fileName: 'DonationBox_${box.boxNumber}_$year.xlsx',
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
@@ -555,7 +557,7 @@ class DonationBoxStorage {
 
     if (outputFile != null) {
       final file = File(outputFile);
-      await file.writeAsBytes(bytes);
+      if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS) await file.writeAsBytes(bytes);
       debugPrint('[DonationBoxStorage] Exported yearly report to $outputFile');
     }
   }
@@ -657,6 +659,8 @@ class DonationBoxStorage {
 
     final String? outputFile = await FilePicker.platform.saveFile(
       dialogTitle: 'Save Annual Donation Boxes Report ($year)',
+      // Android, iOS and web require the bytes and write the file themselves.
+      bytes: Uint8List.fromList(bytes),
       fileName: 'Donation_Boxes_Report_${year}_${branchId.replaceAll(' ', '_')}.xlsx',
       type: FileType.custom,
       allowedExtensions: ['xlsx'],
@@ -664,7 +668,7 @@ class DonationBoxStorage {
 
     if (outputFile != null) {
       final file = File(outputFile);
-      await file.writeAsBytes(bytes);
+      if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS) await file.writeAsBytes(bytes);
       debugPrint('[DonationBoxStorage] Exported all boxes yearly report to $outputFile');
     }
   }

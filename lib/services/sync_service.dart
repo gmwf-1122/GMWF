@@ -1,5 +1,7 @@
 import '../utils/ui_stall_monitor.dart';
 import 'busy_status.dart';
+import 'firebase_session_guard.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -14,6 +16,7 @@ import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/donations_local_storage.dart';
 import 'package:gmwf/pages/madrassa/utils/madrassa_local_storage.dart';
 import 'package:gmwf/pages/school/utils/school_sync_service.dart';
+import 'package:gmwf/pages/school/utils/school_local_storage.dart';
 import 'package:gmwf/services/finance_local_storage.dart';
 import 'package:gmwf/services/finance_loans_storage.dart';
 import 'package:gmwf/services/finance_expenses_storage.dart';
@@ -304,16 +307,50 @@ class SyncService {
   /// Set when the cloud cannot be reached; non-forced passes wait until then.
   DateTime? _stalledUntil;
 
-  /// Checks if an item is a Madrassa daily log, student profile, or status update that should upload first.
+  // Queue items a LAN desk may not upload itself (see Gate 1b in _uploadPending), by queue key.
+  // In memory only: rewriting each item to record this appended its whole payload to the file.
+  final Map<dynamic, DateTime> _lanDeferredUntil = {};
+  static const Duration _lanDeferral = Duration(minutes: 15);
+
+  bool _isLanDeferred(dynamic key) {
+    final until = _lanDeferredUntil[key];
+    if (until == null) return false;
+    if (DateTime.now().isBefore(until)) return true;
+    _lanDeferredUntil.remove(key);
+    return false;
+  }
+
+  /// Item types whose cloud writes go to dispensary paths (patients, inventory, medicines,
+  /// templates, restrictions) that CloudDb refuses on a LAN desk.
+  static bool _lanServerOwnsType(String type) {
+    final t = type.toLowerCase();
+    return t == 'save_patient' ||
+        t == 'delete_patient' ||
+        t.contains('inventory') ||
+        t.contains('stock') ||
+        t.contains('medicine') ||
+        t.contains('proforma') ||
+        t.contains('doctor_template') ||
+        t.contains('restriction');
+  }
+
+  /// Checks if an item is a Madrassa daily log, student profile, fee, attendance, or status update that should upload first.
   bool _isMadrassaDailyLog(Map item) {
     final t = (item['type'] ?? '').toString();
-    return t == 'save_madrassa_log' ||
+    return t.contains('madrassa') ||
+        t == 'save_madrassa_log' ||
         t == 'save_madrassa_daily_log' ||
         t == 'save_madrassa_student' ||
         t == 'save_madrassa_admission' ||
         t == 'delete_madrassa_student' ||
         t == 'offboard_madrassa_student' ||
-        t == 'update_madrassa_student';
+        t == 'update_madrassa_student' ||
+        t == 'save_madrassa_attendance' ||
+        t == 'save_madrassa_teacher_attendance' ||
+        t == 'save_madrassa_fee_payment' ||
+        t == 'save_madrassa_fee' ||
+        t == 'save_madrassa_holiday' ||
+        t == 'delete_madrassa_holiday';
   }
 
   /// Checks if an item belongs to the current calendar month.
@@ -547,7 +584,8 @@ class SyncService {
     final s = e.toString().toLowerCase();
     return s.contains('unavailable') || s.contains('deadline') || s.contains('network') ||
         s.contains('failed to connect') || s.contains('connection') || s.contains('aborted') ||
-        s.contains('[cloud_firestore/internal]') || s.contains('unauthenticated');
+        s.contains('[cloud_firestore/internal]') || s.contains('unauthenticated') ||
+        s.contains('permission-denied') || s.contains('permission denied') || s.contains('status: 403');
   }
 
   /// Records that are typically edited several times in a row.
@@ -557,7 +595,6 @@ class SyncService {
     'save_madrassa_teacher_attendance',
     'save_school_attendance',
     'save_school_teacher_attendance',
-    'save_school_student',
     'save_school_teacher',
     'save_school_grade',
     'save_school_fee',
@@ -1467,6 +1504,9 @@ class SyncService {
 
         final sid = (data['id'] ?? data['studentId'] ?? key).toString().trim();
         if (sid.isEmpty || alreadyQueued.contains(sid)) continue;
+        if (sid.contains('config__current') || sid.contains('__config__')) continue;
+        final name = (data['name'] ?? data['studentName'])?.toString().trim();
+        if (name == null || name.isEmpty) continue;
 
         final targetBranch = _cleanBranch(data['branchId'] ?? branchId);
 
@@ -1521,22 +1561,46 @@ class SyncService {
 
         final raw = mBox.get(key);
         if (raw == null || raw is! Map) continue;
-        final isSynced = (raw['synced'] == true || raw['syncStatus'] == 'synced') && raw['pendingSync'] != true;
-        if (isSynced) continue;
+        final isSynced = (raw['synced'] == true && raw['syncStatus'] == 'synced') && raw['pendingSync'] != true;
+
+        // If any student log inside was edited AFTER lastSyncedAt, it needs sync
+        final lastSyncedStr = raw['lastSyncedAt']?.toString();
+        DateTime? lastSynced = lastSyncedStr != null ? DateTime.tryParse(lastSyncedStr) : null;
+        bool hasRecentEdits = false;
+        if (lastSynced != null) {
+          for (final entry in raw.values) {
+            if (entry is Map && entry['lastEditedAt'] != null) {
+              final editTime = DateTime.tryParse(entry['lastEditedAt'].toString());
+              if (editTime != null && editTime.isAfter(lastSynced)) {
+                hasRecentEdits = true;
+                break;
+              }
+            }
+          }
+        }
+        if (isSynced && !hasRecentEdits) continue;
 
         final keyStr = key.toString();
         if (alreadyQueued.contains(keyStr)) continue;
 
+        // The logs box also holds teacher attendance ('…__madrassa_tchlog__date') and
+        // ZKTeco records ('studentId_date'); those were uploaded as junk daily-log docs
+        // ('-madrassa-tchlog', 'std-…'). Only day logs: 'b__log__date' or legacy 'b_yyyy_MM_dd'.
         String bId = branchId;
-        String dateKey = keyStr;
+        String dateKey;
         if (keyStr.contains('__log__')) {
           final parts = keyStr.split('__log__');
           bId = _cleanBranch(parts[0]);
           dateKey = parts.length > 1 ? parts[1] : keyStr;
-        } else if (keyStr.contains('_')) {
+        } else {
           final parts = keyStr.split('_');
-          bId = parts.isNotEmpty ? _cleanBranch(parts.first) : branchId;
-          dateKey = parts.length >= 4 ? '${parts[1]}-${parts[2]}-${parts[3]}' : parts.last;
+          final isLegacyDayKey = !keyStr.contains('__') && parts.length == 4 &&
+              RegExp(r'^\d{4}$').hasMatch(parts[1]) &&
+              RegExp(r'^\d{2}$').hasMatch(parts[2]) &&
+              RegExp(r'^\d{2}$').hasMatch(parts[3]);
+          if (!isLegacyDayKey) continue;
+          bId = _cleanBranch(parts.first);
+          dateKey = '${parts[1]}-${parts[2]}-${parts[3]}';
         }
 
         await LocalStorageService.enqueueSync({
@@ -1544,7 +1608,11 @@ class SyncService {
           'entityId': 'mlog_${bId}_$dateKey',
           'branchId': bId,
           'dateKey': dateKey,
-          'data': Map<String, dynamic>.from(raw)..remove('syncStatus'),
+          'data': Map<String, dynamic>.from(raw)
+            ..remove('syncStatus')
+            ..remove('pendingSync')
+            ..remove('synced')
+            ..remove('lastSyncedAt'),
           'localBox': LocalStorageService.madrassaLogsBox,
           'localKey': keyStr,
         });
@@ -1871,6 +1939,18 @@ class SyncService {
             _currentUserRole = userData['role'] as String?;
           }
         } catch (_) {}
+      }
+
+      // Firestore rules need a signed-in session; without one every upload is rejected.
+      // Skipped quietly when Firebase never initialised (tests, a failed start).
+      if (!kIsWeb && Firebase.apps.isNotEmpty) {
+        try {
+          if (FirebaseAuth.instance.currentUser == null) {
+            await FirebaseSessionGuard.ensureSession(reason: 'upload');
+          }
+        } catch (e) {
+          debugPrint('[SyncService] session check skipped: $e');
+        }
       }
 
       await _uploadPending(force: force, urgent: urgent);
@@ -2230,6 +2310,17 @@ class SyncService {
             continue;
           }
 
+          // Gate 1b: other items whose cloud write a LAN desk may not make (patients, inventory,
+          // medicines, templates: CloudDb refuses them while the LAN server link is up). They
+          // are kept, since they may not have reached the server, but set aside instead of
+          // being prepared and refused again on every pass (Haji Camp: 567 such items, each
+          // pass froze the desk for 8–28 s before giving up).
+          if (isClientOnLan && (_lanServerOwnsType(type) || _isLanDeferred(k))) {
+            _lanDeferredUntil[k] ??= DateTime.now().add(_lanDeferral);
+            seenThisPass.add(k);
+            continue;
+          }
+
 
           candidateData[k] = map;
           if (_isBacklogItem(map)) {
@@ -2383,12 +2474,14 @@ class SyncService {
           break;
         }
 
+        final batchedProcessedKeys = <dynamic>{};
         for (final key in batchKeys) {
-        final raw = candidateData[key] ?? queueBox.get(key);
-        if (raw == null || raw is! Map) {
-          await queueBox.delete(key);
-          continue;
-        }
+          if (batchedProcessedKeys.contains(key)) continue;
+          final raw = candidateData[key] ?? queueBox.get(key);
+          if (raw == null || raw is! Map) {
+            await queueBox.delete(key);
+            continue;
+          }
 
         final action   = Map<String, dynamic>.from(raw);
         // Self-heal action payload on the fly (repairs missing camp, invalid branch, corrupt date)
@@ -2450,7 +2543,7 @@ class SyncService {
           // docId: the generic collection writer below skipped them without writing anything
           // and the item was removed as uploaded, so a decision queued on the phone never
           // reached Firestore. They go to their own handler further down.
-          if (action['collection'] != null && !_requestEventTypes.contains(type)) {
+          if (action['collection'] != null && !_requestEventTypes.contains(type) && type != 'save_school_student' && type != 'save_madrassa_student') {
             final colPath = action['collection'].toString().trim();
             final docId = action['docId']?.toString().trim();
             final act = (action['action'] ?? 'set').toString().toLowerCase().trim();
@@ -2474,7 +2567,12 @@ class SyncService {
                   }
                 }
               } else {
-                final fsData = LocalStorageService.sanitizeForCloudUpload(data);
+                var fsData = LocalStorageService.sanitizeForCloudUpload(data);
+                if (colPath.contains('madrassa_students')) {
+                  fsData = MadrassaLocalStorage.compactMediaForCloud(fsData);
+                } else if (colPath.contains('school_students')) {
+                  fsData = SchoolLocalStorage.compactMediaForCloud(fsData);
+                }
                 await docRef.set(fsData, SetOptions(merge: true));
                 if (isUserCol) {
                   // Dual write: ensure both root /users and branch /branches/{b}/users are updated
@@ -4171,12 +4269,19 @@ class SyncService {
                 for (final e in sessionCounts.entries) 'session_${e.key}_total': FieldValue.increment(e.value),
               if (batchId != null) 'appliedBatches': FieldValue.arrayUnion([batchId]),
               'lastUpdated': FieldValue.serverTimestamp(),
-              'date': dateKey,
               'dateKey': dateKey,
               'branchId': bId,
             };
-            batch.set(dayDocRef, dayUpdate, SetOptions(merge: true));
-            await batch.commit();
+
+            if (!alreadyApplied) {
+              await dayDocRef.set(dayUpdate, SetOptions(merge: true));
+            }
+
+            try {
+              await batch.commit();
+            } catch (tokErr) {
+              debugPrint('[SyncService] Individual subcollection tokens commit deferred: $tokErr');
+            }
 
             try {
               if (Hive.isBoxOpen('dasterkhwaan_tokens')) {
@@ -4236,16 +4341,23 @@ class SyncService {
               'lastUpdated': FieldValue.serverTimestamp(),
             };
             if (!alreadyReversed) {
-              sessionCounts.forEach((s, count) {
-                final cnt = (count as num?)?.toInt() ?? 0;
-                if (cnt > 0) {
-                  dayUpdate['session_${s}_total'] = FieldValue.increment(-cnt);
+              sessionCounts.forEach((s, cnt) {
+                final cVal = (cnt as num?)?.toInt() ?? 0;
+                if (cVal > 0) {
+                  dayUpdate['session_${s}_total'] = FieldValue.increment(-cVal);
                 }
               });
             }
 
-            batch.set(dayDocRef, dayUpdate, SetOptions(merge: true));
-            await batch.commit();
+            if (!alreadyReversed) {
+              await dayDocRef.set(dayUpdate, SetOptions(merge: true));
+            }
+
+            try {
+              await batch.commit();
+            } catch (delErr) {
+              debugPrint('[SyncService] Individual token deletes commit deferred: $delErr');
+            }
           }
           else if (type == 'serve_dasterkhwan_token') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
@@ -4344,10 +4456,27 @@ class SyncService {
               action['branchId'] ?? (action['data'] is Map ? action['data']['branchId'] : null),
               fallback: (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') ? branchId : 'gujrat',
             );
-            final data = Map<String, dynamic>.from(action['data'] ?? action);
+            final rawPayload = action['data'] is Map
+                ? action['data']
+                : (action['logData'] is Map ? action['logData'] : action);
+            final data = Map<String, dynamic>.from(rawPayload);
+            data.remove('type');
+            data.remove('branchId');
+            data.remove('dateKey');
+            data.remove('datePart');
+            data.remove('date');
             data.remove('syncStatus');
+            // These live inside the local day map; uploaded, they came back on every
+            // PC's download as "pending" and the day was re-uploaded forever.
+            data.remove('pendingSync');
+            data.remove('synced');
+            data.remove('lastSyncedAt');
             data.remove('localBox');
             data.remove('localKey');
+            data.remove('syncId');
+            data.remove('entityId');
+            data.remove('attempts');
+            data.remove('nextRetryAt');
             await _db.collection('branches').doc(bId).collection('madrassa_daily_logs').doc(dateKey).set(data, SetOptions(merge: true));
             if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
               final mBox = Hive.box(LocalStorageService.madrassaLogsBox);
@@ -4369,8 +4498,44 @@ class SyncService {
             );
             final data = Map<String, dynamic>.from(action['data'] ?? {});
             if (dateKey == null) throw Exception('Missing dateKey');
+            for (final f in const ['syncStatus', 'pendingSync', 'synced', 'lastSyncedAt']) {
+              data.remove(f);
+            }
             data['lastUpdatedAt'] = FieldValue.serverTimestamp();
-            await _db.collection('branches').doc(bId).collection('madrassa_teacher_attendance').doc(dateKey).set(data, SetOptions(merge: true));
+            final ref = _db.collection('branches').doc(bId).collection('madrassa_teacher_attendance').doc(dateKey);
+            final entries = data['entries'] is Map ? Map<String, dynamic>.from(data['entries'] as Map) : <String, dynamic>{};
+            final autoIds = entries.entries
+                .where((e) => e.value is Map && (e.value as Map)['autoPresent'] == true)
+                .map((e) => e.key)
+                .toList();
+            if (autoIds.isEmpty) {
+              await ref.set(data, SetOptions(merge: true));
+            } else {
+              // An untouched teacher is saved as 'present' (autoPresent). It must not
+              // replace a real status another PC already uploaded for that teacher.
+              await _db.runTransaction((tx) async {
+                final snap = await tx.get(ref);
+                final cloudEntries = snap.data()?['entries'];
+                final toWrite = Map<String, dynamic>.from(entries);
+                if (cloudEntries is Map) {
+                  for (final id in autoIds) {
+                    final c = cloudEntries[id];
+                    if (c is Map && c['autoPresent'] != true) toWrite.remove(id);
+                  }
+                }
+                tx.set(ref, {...data, 'entries': toWrite}, SetOptions(merge: true));
+              }).timeout(const Duration(seconds: 25));
+            }
+            // Mark the local copy synced, or the backfill re-uploaded it every sweep.
+            if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
+              final mBox = Hive.box(LocalStorageService.madrassaLogsBox);
+              final rawB = (action['branchId'] ?? action['data']?['branchId'] ?? bId).toString().toLowerCase().trim();
+              final lKey = '${rawB}__madrassa_tchlog__$dateKey';
+              final local = mBox.get(lKey);
+              if (local is Map && local['lastUpdated'] == action['data']?['lastUpdated']) {
+                await mBox.put(lKey, Map<String, dynamic>.from(local)..['syncStatus'] = 'synced');
+              }
+            }
           }
           else if (type == 'save_donation_box') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
@@ -4445,6 +4610,14 @@ class SyncService {
               );
               return;
             }
+            final studentName = (data['name'] ?? data['studentName'])?.toString().trim();
+            if (studentId.contains('config__current') || studentId.contains('__config__') || studentName == null || studentName.isEmpty) {
+              // Corrupted phantom stub without a name or a config doc: prune immediately
+              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+                await Hive.box(LocalStorageService.syncBox).delete(key);
+              }
+              return;
+            }
             var bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
             if (bId.isEmpty || bId == 'all' || bId == 'global') {
               final studentBranch = (data['branchId'] ?? data['branch'] ?? '').toString().toLowerCase().trim();
@@ -4458,6 +4631,9 @@ class SyncService {
             // the raw id put a PC's students in a folder no other screen read.
             bId = MadrassaLocalStorage.normalizeBranch(bId);
             data['branchId'] = bId;
+            if (studentId.contains('__std__')) {
+              studentId = studentId.split('__std__').last.trim();
+            }
             if (studentId.isEmpty) throw Exception('Missing studentId');
             if (data['joinDate'] is String) {
               final parsed = DateTime.tryParse(data['joinDate'] as String);
@@ -4493,11 +4669,72 @@ class SyncService {
               }
             }
           }
+          else if (type == 'save_school_student' || type == 'save_school_admission') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            String? studentId = action['studentId']?.toString().trim();
+            if (studentId == null || studentId.isEmpty) {
+              studentId = (data['studentId'] ?? data['id'] ?? data['localId'] ?? action['localId'] ?? action['entityId'] ?? action['docId'])
+                  ?.toString()
+                  .trim();
+            }
+            if (studentId == null || studentId.isEmpty) {
+              await LocalStorageService.moveToDeadLetterQueue(
+                LocalStorageService.syncBox,
+                key,
+                Map<String, dynamic>.from(action),
+                reason: 'save_school_student has no studentId',
+              );
+              return;
+            }
+            var bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
+            if (bId.isEmpty || bId == 'all' || bId == 'global') {
+              final studentBranch = (data['branchId'] ?? data['branch'] ?? '').toString().toLowerCase().trim();
+              bId = studentBranch.isNotEmpty && studentBranch != 'all' && studentBranch != 'global'
+                  ? studentBranch
+                  : 'gujrat';
+            }
+            bId = MadrassaLocalStorage.normalizeBranch(bId);
+            data['branchId'] = bId;
+            data['lastModified'] = DateTime.now().toIso8601String();
+            final fsData = SchoolLocalStorage.compactMediaForCloud(LocalStorageService.sanitizeForCloudUpload(data));
+            await _db.collection('branches').doc(bId).collection('school_students').doc(studentId).set(fsData, SetOptions(merge: true));
+
+            if (Hive.isBoxOpen(LocalStorageService.schoolStudentsBox)) {
+              final sBox = Hive.box(LocalStorageService.schoolStudentsBox);
+              dynamic hitKey;
+              final lk = action['localKey'];
+              if (lk != null && sBox.containsKey(lk)) {
+                hitKey = lk;
+              } else {
+                for (final k in ['${bId}__std__$studentId', '${bId}__$studentId', studentId]) {
+                  if (sBox.containsKey(k)) {
+                    hitKey = k;
+                    break;
+                  }
+                }
+              }
+              if (hitKey != null) {
+                final r = Map<String, dynamic>.from(sBox.get(hitKey) as Map);
+                await sBox.put(hitKey, r
+                  ..['syncStatus'] = 'synced'
+                  ..['synced'] = true
+                  ..['pendingSync'] = false
+                  ..['lastSyncedAt'] = DateTime.now().toIso8601String());
+              }
+            }
+          }
           else if (type == 'permanent_delete_madrassa_student') {
             final studentId = action['studentId'] as String?;
-            final bId = MadrassaLocalStorage.normalizeBranch(action['branchId']?.toString() ?? branchId);
+            final rawBId = action['branchId']?.toString() ?? branchId;
+            final bId = MadrassaLocalStorage.normalizeBranch(rawBId);
             if (studentId != null && studentId.isNotEmpty) {
-              await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).delete().catchError((_) {});
+              if (bId == 'all' || bId == 'global' || bId.isEmpty) {
+                for (final b in ['gujrat', 'karachi', 'saddar', 'haji', 'sialkot', 'jalalpurjattan']) {
+                  await _db.collection('branches').doc(b).collection('madrassa_students').doc(studentId).delete().catchError((_) {});
+                }
+              } else {
+                await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).delete().catchError((_) {});
+              }
             }
           }
           else if (type == 'delete_madrassa_student' || type == 'offboard_madrassa_student') {
@@ -4516,11 +4753,45 @@ class SyncService {
             final currentLines = (action['currentLines'] as num?)?.toInt();
             if (studentId == null || currentLines == null) throw Exception('Missing studentId/currentLines');
             final ubId = MadrassaLocalStorage.normalizeBranch(_cleanBranch(action['branchId'] ?? branchId));
-            // merge-set (not update) so it also works before the student doc has uploaded
-            await _db.collection('branches').doc(ubId).collection('madrassa_students').doc(studentId).set({
+
+            // High performance: batch all pending update_madrassa_student actions from batchKeys into one commit
+            final batch = _db.batch();
+            final batchedKeys = <dynamic>[key];
+            final processedStudentIds = <String>{studentId};
+
+            batch.set(_db.collection('branches').doc(ubId).collection('madrassa_students').doc(studentId), {
               'currentLines': currentLines,
               'lastUpdatedAt': FieldValue.serverTimestamp(),
             }, SetOptions(merge: true));
+
+            for (final otherKey in batchKeys) {
+              if (otherKey == key || batchedProcessedKeys.contains(otherKey)) continue;
+              final otherRaw = candidateData[otherKey] ?? queueBox.get(otherKey);
+              if (otherRaw is Map && otherRaw['type'] == 'update_madrassa_student') {
+                final oSId = otherRaw['studentId']?.toString();
+                final oLines = (otherRaw['currentLines'] as num?)?.toInt();
+                final oBId = MadrassaLocalStorage.normalizeBranch(_cleanBranch(otherRaw['branchId'] ?? branchId));
+                if (oSId != null && oLines != null) {
+                  if (!processedStudentIds.contains(oSId)) {
+                    batch.set(_db.collection('branches').doc(oBId).collection('madrassa_students').doc(oSId), {
+                      'currentLines': oLines,
+                      'lastUpdatedAt': FieldValue.serverTimestamp(),
+                    }, SetOptions(merge: true));
+                    processedStudentIds.add(oSId);
+                  }
+                  batchedKeys.add(otherKey);
+                }
+              }
+            }
+
+            await batch.commit();
+
+            for (final bk in batchedKeys) {
+              batchedProcessedKeys.add(bk);
+              if (bk != key) {
+                await queueBox.delete(bk);
+              }
+            }
           }
           else if (type == 'save_madrassa_fee_payment' || type == 'save_madrassa_fee') {
             final bId = MadrassaLocalStorage.normalizeBranch(action['branchId']?.toString() ?? branchId);
@@ -4770,6 +5041,12 @@ class SyncService {
           uploadedThisPass++;
         } catch (e, stackTrace) {
           debugPrint('[SyncService] ❌ Failed to upload [$type] key: $key: $e');
+          // Refused because this desk is on the LAN (CloudDb): not a network failure. Set it
+          // aside without rewriting it, and let the rest of the queue run.
+          if (e.toString().contains(CloudDb.lanDeskRefusal)) {
+            _lanDeferredUntil[key] = DateTime.now().add(_lanDeferral);
+            continue;
+          }
           if (QuotaService.isQuotaError(e) && QuotaService.isPausedForDailyReset) {
             action['lastAttempt'] = DateTime.now().toIso8601String();
             action['lastError'] = e.toString();

@@ -20,8 +20,17 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
 class BusyTask {
-  BusyTask._(this.id, this.message, this.detail, this.blocking, this.background)
-      : startedAt = DateTime.now();
+  BusyTask._(this.id, this.message, this.detail, this.blocking, this.background, {Duration timeout = const Duration(seconds: 40)})
+      : startedAt = DateTime.now() {
+    if (blocking) {
+      _timeoutTimer = Timer(timeout, () {
+        if (!_ended) {
+          debugPrint('[BusyTask] ⚠️ Blocking task "$message" exceeded overall time limit (${timeout.inSeconds}s). Auto-dismissing to prevent screen lock.');
+          end();
+        }
+      });
+    }
+  }
 
   final int id;
   String message;
@@ -30,6 +39,7 @@ class BusyTask {
   final bool background;
   final DateTime startedAt;
   bool _ended = false;
+  Timer? _timeoutTimer;
 
   /// Change the text shown for this task (e.g. move to the next step).
   void update(String message, {String? detail}) {
@@ -42,6 +52,8 @@ class BusyTask {
   void end() {
     if (_ended) return;
     _ended = true;
+    _timeoutTimer?.cancel();
+    _timeoutTimer = null;
     BusyStatus._remove(this);
   }
 }
@@ -83,13 +95,28 @@ class BusyStatus {
 
   static bool get hasBlocking => _tasks.any((t) => t.blocking);
 
+  /// Dismiss all active busy statuses and overlays immediately.
+  static void dismissAll() {
+    for (final task in List<BusyTask>.from(_tasks)) {
+      task.end();
+    }
+    _tasks.clear();
+    _notify();
+  }
+
   /// Start showing a status. Call [BusyTask.end] when done (use try/finally).
   ///
   /// [blocking] dims the screen and shows a centred card (use for steps the user must wait
   /// for, like opening their workspace). [background] shows a small, quiet pill for work the
   /// user can ignore (like syncing).
-  static BusyTask begin(String message, {String? detail, bool blocking = false, bool background = false}) {
-    final task = BusyTask._(_nextId++, message, detail, blocking, background);
+  static BusyTask begin(
+    String message, {
+    String? detail,
+    bool blocking = false,
+    bool background = false,
+    Duration timeout = const Duration(seconds: 40),
+  }) {
+    final task = BusyTask._(_nextId++, message, detail, blocking, background, timeout: timeout);
     _tasks.add(task);
     _notify();
     return task;

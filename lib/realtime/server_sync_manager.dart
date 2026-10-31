@@ -2098,6 +2098,11 @@ class ServerSyncManager {
           final logData = cleanData['data'] is Map
               ? Map<String, dynamic>.from(cleanData['data'])
               : (cleanData['logData'] is Map ? Map<String, dynamic>.from(cleanData['logData']) : cleanData);
+          // The desk's local sync flags ride inside the day map; uploaded, every PC
+          // downloaded the day as "pending" and re-uploaded it.
+          for (final f in const ['syncStatus', 'pendingSync', 'synced', 'lastSyncedAt']) {
+            logData.remove(f);
+          }
           await _db
               .collection('branches').doc(branchId)
               .collection('madrassa_daily_logs').doc(docId)

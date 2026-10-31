@@ -67,6 +67,9 @@ class _HybridAllInOneScreenState extends State<HybridAllInOneScreen> {
   void initState() {
     super.initState();
     CampSessionService.activeCampNotifier.addListener(_scheduleAdvance);
+    // Another desk opened a patient (skip them) or won the same token (move on).
+    DispenseQueue.listenForClaims();
+    DispenseQueue.claimsChanged.addListener(_scheduleAdvance);
     for (final name in [LocalStorageService.entriesBox, LocalStorageService.dispensaryBox]) {
       LocalStorageService.ensureBoxOpen(name).then((box) {
         if (!mounted) return;
@@ -82,6 +85,7 @@ class _HybridAllInOneScreenState extends State<HybridAllInOneScreen> {
   void dispose() {
     _advanceDebounce?.cancel();
     CampSessionService.activeCampNotifier.removeListener(_scheduleAdvance);
+    DispenseQueue.claimsChanged.removeListener(_scheduleAdvance);
     for (final b in _boxes) {
       b.removeListener(_scheduleAdvance);
     }
@@ -112,10 +116,9 @@ class _HybridAllInOneScreenState extends State<HybridAllInOneScreen> {
     if (!mounted) return;
     try {
       final queue = _queue(_sessionFilter);
-      final skip = _justDispensed?.trim().toUpperCase();
+      final skip = _justDispensed;
       if (skip != null &&
-          !DispenseQueue.activePending(queue)
-              .any((p) => (p['serial']?.toString().trim().toUpperCase() ?? '') == skip)) {
+          !DispenseQueue.activePending(queue).any((p) => DispenseQueue.sameSerial(p['serial'], skip))) {
         _justDispensed = null; // the queue has caught up
       }
 
@@ -123,13 +126,13 @@ class _HybridAllInOneScreenState extends State<HybridAllInOneScreen> {
       if (current != null && current.isNotEmpty) {
         // Still waiting (in any shift)? Keep it — e.g. the user changed the shift filter.
         final stillWaiting = DispenseQueue.pickNext(queue, currentSerial: current, skipSerial: _justDispensed);
-        if (stillWaiting?['serial']?.toString() == current) return;
+        if (DispenseQueue.sameSerial(stillWaiting?['serial'], current)) return;
         final anyShift = DispenseQueue.pickNext(_queue('all'), currentSerial: current, skipSerial: _justDispensed);
-        if (anyShift?['serial']?.toString() == current) return;
+        if (DispenseQueue.sameSerial(anyShift?['serial'], current)) return;
       }
 
       final next = DispenseQueue.pickNext(queue, skipSerial: _justDispensed);
-      if (next?['serial']?.toString() != current || (next == null) != (_dispensing == null)) {
+      if (!DispenseQueue.sameSerial(next?['serial'], current) || (next == null) != (_dispensing == null)) {
         setState(() => _dispensing = next);
       }
     } catch (e) {

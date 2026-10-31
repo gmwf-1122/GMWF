@@ -187,7 +187,7 @@ class _TransactionCardState extends State<TransactionCard> {
                       else
                         Text(
                           'PKR ${NumberFormat('#,##0').format(donation.amount)}',
-                          style: GoogleFonts.dmMono(fontSize: 14, fontWeight: FontWeight.w900, color: t.textPrimary),
+                          style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 14, fontWeight: FontWeight.w900, color: t.textPrimary),
                         ),
                       const SizedBox(height: 5),
                       _statusPill(donation.isGoods ? DonationStatus.received : donation.status),
@@ -654,10 +654,16 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                     onSelected: (value) async {
                       switch (value) {
                         case 'received':
-                          await DonationsLocalStorage.updateDonationStatus(
-                            branchId: d.branchId, localId: d.localId, date: d.date, newStatus: DonationStatus.received, firestoreId: d.firestoreId,
+                          final marked = await DonationsLocalStorage.updateDonationStatus(
+                            branchId: d.branchId, localId: d.localId, date: d.date, newStatus: DonationStatus.received,
+                            firestoreId: d.firestoreId, hiveKey: d.hiveKey,
                           );
-                          if (context.mounted) { Navigator.pop(context); AppToast.showSnackBar(context, const SnackBar(content: Text('Marked as Received'))); }
+                          if (context.mounted) {
+                            Navigator.pop(context);
+                            AppToast.showSnackBar(context, SnackBar(
+                              content: Text(marked ? 'Marked as Received' : 'Could not find this donation on this PC — sync and try again'),
+                            ));
+                          }
                           break;
                         case 'edit_donor':
                           Navigator.pop(context);

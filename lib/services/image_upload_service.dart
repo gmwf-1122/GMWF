@@ -53,9 +53,9 @@ class ImageUploadService {
   /// Includes graceful fallback to Gallery / FilePicker if Camera plugin is unavailable on desktop platforms.
   static Future<String?> pickAndProcessImage({
     ImageSource source = ImageSource.gallery,
-    int maxWidth = 800,
-    int maxHeight = 800,
-    int quality = 70,
+    int maxWidth = 600,
+    int maxHeight = 600,
+    int quality = 65,
   }) async {
     try {
       bool isDesktop = false;
@@ -105,6 +105,9 @@ class ImageUploadService {
     }
   }
 
+  /// Maximum allowed byte size for non-image documents (e.g. PDF) stored directly in Firestore
+  static const int maxDocumentByteSize = 350 * 1024; // 350 KB
+
   /// Picks any file using FilePicker, compresses image if applicable, and returns Base64 data URI.
   static Future<String?> pickDocumentFile({
     List<String>? allowedExtensions,
@@ -128,9 +131,14 @@ class ImageUploadService {
 
       final ext = file.extension?.toLowerCase() ?? 'jpg';
       if (['jpg', 'jpeg', 'png', 'webp', 'bmp'].contains(ext)) {
-        return processBytesToBase64(bytes);
+        return processBytesToBase64(bytes, quality: 60, maxWidth: 700, maxHeight: 700);
       } else {
-        // PDF or non-image document -> raw Base64 data URI
+        // Enforce document byte size ceiling so it never exceeds Firestore document limits
+        if (bytes.lengthInBytes > maxDocumentByteSize) {
+          debugPrint('[ImageUploadService] ⚠️ Document file (${bytes.lengthInBytes} bytes) exceeds $maxDocumentByteSize limit.');
+          return null;
+        }
+        // PDF or non-image document -> Base64 data URI
         final b64 = base64Encode(bytes);
         return 'data:application/$ext;base64,$b64';
       }
@@ -143,9 +151,9 @@ class ImageUploadService {
   /// Processes raw image bytes: resizes, compresses JPEG quality, and returns a Base64 data URI string.
   static String? processBytesToBase64(
     Uint8List rawBytes, {
-    int quality = 70,
-    int maxWidth = 800,
-    int maxHeight = 800,
+    int quality = 65,
+    int maxWidth = 600,
+    int maxHeight = 600,
   }) {
     try {
       final decoded = img.decodeImage(rawBytes);

@@ -17,6 +17,7 @@ import 'package:gmwf/services/master_proforma_service.dart';
 import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/services/dispensary_preferences_service.dart';
 import 'patient_form_helper.dart';
+import 'dispense_queue.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/realtime/connection_manager.dart';
@@ -58,6 +59,7 @@ class _PatientFormState extends State<PatientForm> {
   int? _selectedSyringeCount;
   String? _selectedSyringeHiveKey;
   int? _selectedNeedleCount;
+  Timer? _claimRenewal;
 
   bool get _isKarachi {
     final b = widget.branchId.toLowerCase().trim();
@@ -99,7 +101,7 @@ class _PatientFormState extends State<PatientForm> {
   // ─── Queue-type resolver ──────────────────────────────────────────────────
   String get _resolvedQueueType {
     final serial = _resolvedSerial;
-    if (serial.isNotEmpty) {
+    if (serial.isNotEmpty && Hive.isBoxOpen(LocalStorageService.entriesBox)) {
       final raw = Hive.box(LocalStorageService.entriesBox)
           .get('${widget.branchId}-$serial')?['queueType']?.toString();
       if (raw != null && raw.isNotEmpty) return _normaliseQueueType(raw);
@@ -112,18 +114,18 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   List<dynamic> _getPrescriptionsList() {
-    final fromData = _data['prescriptions'] ?? _data['medicines'];
+    final fromData = _data['prescriptions'] ?? _data['medicines'] ?? _data['items'];
     if (fromData is List && fromData.isNotEmpty) return fromData;
     final embeddedData = _data['prescription'];
     if (embeddedData is Map) {
-      final embList = embeddedData['prescriptions'] ?? embeddedData['medicines'];
+      final embList = embeddedData['prescriptions'] ?? embeddedData['medicines'] ?? embeddedData['items'];
       if (embList is List && embList.isNotEmpty) return embList;
     }
-    final fromQueue = widget.queueEntry['prescriptions'] ?? widget.queueEntry['medicines'];
+    final fromQueue = widget.queueEntry['prescriptions'] ?? widget.queueEntry['medicines'] ?? widget.queueEntry['items'];
     if (fromQueue is List && fromQueue.isNotEmpty) return fromQueue;
     final embeddedQueue = widget.queueEntry['prescription'];
     if (embeddedQueue is Map) {
-      final embList = embeddedQueue['prescriptions'] ?? embeddedQueue['medicines'];
+      final embList = embeddedQueue['prescriptions'] ?? embeddedQueue['medicines'] ?? embeddedQueue['items'];
       if (embList is List && embList.isNotEmpty) return embList;
     }
     return [];
@@ -204,21 +206,27 @@ class _PatientFormState extends State<PatientForm> {
     super.initState();
     _loadBranchName();
     _loadPrescription();
+    _claimForThisDesk();
+    _claimRenewal = Timer.periodic(DispenseQueue.claimRenewal, (_) => _claimForThisDesk());
     _realtimeSub = RealtimeManager().messageStream.listen((event) {
       final type = event['event_type'] as String?;
-      final data = event['data'] as Map<String, dynamic>? ?? {};
+      final rawData = event['data'];
+      final data = rawData is Map ? Map<String, dynamic>.from(rawData) : <String, dynamic>{};
       if (type == null) return;
-      final eventSerial = data['serial']?.toString().trim();
+      final eventSerial = (data['serial'] ?? data['id'])?.toString().trim() ?? '';
       final mySerial = _resolvedSerial.trim();
       final eventBranch = data['branchId']?.toString().trim().toLowerCase();
       final myBranch = widget.branchId.toLowerCase().trim();
       if (eventBranch != null && eventBranch.isNotEmpty && myBranch.isNotEmpty &&
           eventBranch != myBranch && !CampSessionService.areBranchesMatching(eventBranch, myBranch)) return;
-      if (eventSerial != null && eventSerial.isNotEmpty &&
-          mySerial.isNotEmpty && !CampSessionService.isSameSerial(eventSerial, mySerial, myBranch)) return;
+      // Only this patient's events. One without a serial used to pass this check, so another
+      // patient's prescription was shown here (or the form reloaded and came up empty).
+      if (eventSerial.isEmpty || mySerial.isEmpty ||
+          !CampSessionService.isSameSerial(eventSerial, mySerial, myBranch)) return;
 
       // When prescription arrives from doctor for this active patient, apply immediately!
       if (type == RealtimeEvents.savePrescription || type == 'prescription_created') {
+        if (LocalStorageService.isOlderPrescription(data, _data)) return;
         final rxList = data['prescriptions'] ?? data['medicines'];
         if (rxList is List && rxList.isNotEmpty) {
           if (mounted) {
@@ -242,8 +250,21 @@ class _PatientFormState extends State<PatientForm> {
     });
   }
 
+  /// Tells the other desks this patient is being dispensed here, so they don't open them too.
+  void _claimForThisDesk() {
+    final serial = _resolvedSerial;
+    if (serial.isEmpty || _isDispensed ||
+        (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed') {
+      return;
+    }
+    DispenseQueue.listenForClaims();
+    DispenseQueue.claim(serial, widget.branchId, deskName: widget.dispenserName);
+  }
+
   @override
   void dispose() {
+    _claimRenewal?.cancel();
+    DispenseQueue.release(_resolvedSerial, widget.branchId);
     _realtimeSub?.cancel();
     _stockWatch?.cancel();
     super.dispose();
@@ -281,10 +302,17 @@ class _PatientFormState extends State<PatientForm> {
   void didUpdateWidget(covariant PatientForm oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.queueEntry != widget.queueEntry || oldWidget.branchId != widget.branchId) {
-      _data = {};
-      _selectedSyringeCount = null;
-      _selectedSyringeHiveKey = null;
-      _selectedNeedleCount = null;
+      // The host hands over a fresh map for the same patient on every refresh (prescription
+      // re-sent, queue rebuilt). Clearing then left the form empty, and the syringe/needle
+      // picks reset, mid-dispense. Start over only for a different patient.
+      final oldSerial = (oldWidget.queueEntry['serial'] ?? oldWidget.queueEntry['id'])?.toString();
+      final newSerial = (widget.queueEntry['serial'] ?? widget.queueEntry['id'])?.toString();
+      if (oldWidget.branchId != widget.branchId || !DispenseQueue.sameSerial(oldSerial, newSerial)) {
+        _data = {};
+        _selectedSyringeCount = null;
+        _selectedSyringeHiveKey = null;
+        _selectedNeedleCount = null;
+      }
       _loadPrescription();
     }
   }
@@ -292,12 +320,22 @@ class _PatientFormState extends State<PatientForm> {
   // ─── Prescription loader ──────────────────────────────────────────────────
   Future<void> _loadPrescription() async {
     if (!mounted) return;
-    setState(() => _isLoadingPrescription = true);
+    // A refresh keeps what is on screen; the spinner is only for the first load.
+    if (_data.isEmpty) setState(() => _isLoadingPrescription = true);
     try {
       // 1. Direct embedded check from widget.queueEntry (fastest and most accurate)
       final directEmbedded = widget.queueEntry['prescription'];
+      final directRxList = directEmbedded is Map
+          ? (directEmbedded['prescriptions'] ?? directEmbedded['medicines'] ?? directEmbedded['items'])
+          : null;
+      final directHasMeds = directRxList is List && directRxList.isNotEmpty;
+      final directIsVitals = directEmbedded is Map &&
+          (directEmbedded['isVitalsOnly'] == true || directEmbedded['vitalsOnly'] == true) &&
+          directEmbedded['completedAt'] != null;
+
       if (directEmbedded is Map && directEmbedded.isNotEmpty &&
-          (directEmbedded['prescriptions'] is List || directEmbedded['complaint'] != null || directEmbedded['diagnosis'] != null)) {
+          !LocalStorageService.isOlderPrescription(directEmbedded, _data) &&
+          (directHasMeds || directIsVitals)) {
         if (mounted) {
           setState(() {
             _data = Map<String, dynamic>.from(directEmbedded);
@@ -394,7 +432,12 @@ class _PatientFormState extends State<PatientForm> {
       final dispenseStatus = (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase();
       if (mounted) {
         setState(() {
-          _data = found;
+          // Nothing found on a refresh (or only an older copy): keep the prescription shown.
+          if (found.isNotEmpty && !LocalStorageService.isOlderPrescription(found, _data)) {
+            _data = found;
+          } else if (directEmbedded is Map && _data.isEmpty) {
+            _data = Map<String, dynamic>.from(directEmbedded);
+          }
           _gender = _resolveGender();
           _age = _resolveAge();
           _isDispensed = dispenseStatus == 'dispensed';
@@ -893,12 +936,15 @@ class _PatientFormState extends State<PatientForm> {
         '${_data['campId']}|${_data['dispensaryId']}|${CampSessionService.getActiveCamp(widget.branchId)}';
     final cached = _syringeCache;
     if (cached != null && key == _syringeCacheKey) return cached;
-    _stockWatch ??= Hive.box(LocalStorageService.stockBox).watch().listen((_) => _syringeCache = null);
+    if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
+      _stockWatch ??= Hive.box(LocalStorageService.stockBox).watch().listen((_) => _syringeCache = null);
+    }
     _syringeCacheKey = key;
     return _syringeCache = _getAvailableSyringeStockItems();
   }
 
   List<Map<String, dynamic>> _getAvailableSyringeStockItems() {
+    if (!Hive.isBoxOpen(LocalStorageService.stockBox)) return [];
     final stockBox = Hive.box(LocalStorageService.stockBox);
     final List<Map<String, dynamic>> list = [];
     final normBranch = widget.branchId.toLowerCase().trim();
@@ -1577,6 +1623,49 @@ class _PatientFormState extends State<PatientForm> {
       };
 
       await entriesBox.put(canonicalKey, fullEntry);
+
+      final allPrescriptions = (_data['prescriptions'] as List?) ??
+          (_data['medicines'] as List?) ??
+          _getPrescriptionsList();
+      final medicines = allPrescriptions
+          .where((m) => m is Map && PatientFormHelper.isInventoryMed(m))
+          .toList();
+
+      // Tell the other desks now, right after the local save. It used to go out only after the
+      // stock deduction, in the background: a PC closed in between never sent it, and the
+      // other desks kept the patient as waiting (open to a second dispense). sendMessage saves
+      // it to the outbox first, so it survives a restart. Peers deduct their stock from
+      // 'medicines' once per token, so this is the only dispense message.
+      try {
+        RealtimeManager().sendMessage(RealtimeEvents.payload(
+          type: 'dispense_completed',
+          data: {
+            'branchId': widget.branchId,
+            'serial': normSerial,
+            'dateKey': dateKey,
+            if ((fullEntry['entryUid'] ?? widget.queueEntry['entryUid'] ?? _data['entryUid']) != null)
+              'entryUid': (fullEntry['entryUid'] ?? widget.queueEntry['entryUid'] ?? _data['entryUid']),
+            ...minimalUpdate,
+            if (doctorName.isNotEmpty && doctorName != 'Unknown') 'doctorName': doctorName,
+            if (doctorId.isNotEmpty) 'doctorId': doctorId,
+            if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'createdByName': tokenBy,
+            if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'tokenBy': tokenBy,
+            if (createdBy.isNotEmpty) 'createdBy': createdBy,
+            if (fullEntry['patientName'] != null) 'patientName': fullEntry['patientName'],
+            if (fullEntry['name'] != null) 'name': fullEntry['name'],
+            if (fullEntry['patientCnic'] != null) 'patientCnic': fullEntry['patientCnic'],
+            if (fullEntry['cnic'] != null) 'cnic': fullEntry['cnic'],
+            if (fullEntry['guardianCnic'] != null) 'guardianCnic': fullEntry['guardianCnic'],
+            if (fullEntry['guardianName'] != null) 'guardianName': fullEntry['guardianName'],
+            if (fullEntry['campId'] != null) 'campId': fullEntry['campId'],
+            if (fullEntry['dispensaryId'] != null) 'dispensaryId': fullEntry['dispensaryId'],
+            if (fullEntry['dispensaryTag'] != null) 'dispensaryTag': fullEntry['dispensaryTag'],
+            if (fullEntry['session'] != null) 'session': fullEntry['session'],
+            if (medicines.isNotEmpty) 'medicines': medicines,
+          },
+        ));
+      } catch (_) {}
+
       // Clean up legacy non-canonical keys so duplicate records are not kept
       if (entriesBox.containsKey(rawSerial) && rawSerial != canonicalKey) {
         await entriesBox.delete(rawSerial);
@@ -1614,13 +1703,6 @@ class _PatientFormState extends State<PatientForm> {
       };
       await LocalStorageService.saveLocalDispensaryRecord(dispensaryRecord);
 
-      final allPrescriptions = (_data['prescriptions'] as List?) ??
-          (_data['medicines'] as List?) ??
-          _getPrescriptionsList();
-      final medicines = allPrescriptions
-          .where((m) => m is Map && PatientFormHelper.isInventoryMed(m))
-          .toList();
-
       // 3. Mark UI state complete immediately (Instant feedback)
       if (mounted) {
         setState(() {
@@ -1637,46 +1719,14 @@ class _PatientFormState extends State<PatientForm> {
       }
       widget.onDispensed?.call();
 
-      // 4. Run inventory deduction, LAN broadcast & Firestore sync asynchronously in background
+      // 4. Run inventory deduction & Firestore sync asynchronously in background
       unawaited(() async {
         try {
-          List<Map<String, dynamic>> deductedBatches = [];
           if (medicines.isNotEmpty) {
-            deductedBatches = await _deductInventoryLocally(widget.branchId, normSerial, medicines, days);
+            await _deductInventoryLocally(widget.branchId, normSerial, medicines, days);
           }
           await _deductSyringeIfNeeded(widget.branchId, normSerial, allPrescriptions);
           await _deductNeedleIfNeeded(widget.branchId, normSerial, allPrescriptions);
-
-          try {
-            RealtimeManager().sendMessage(RealtimeEvents.payload(
-              type: 'dispense_completed',
-              data: {
-                'branchId': widget.branchId,
-                'serial': normSerial,
-                'dateKey': dateKey,
-                if ((fullEntry['entryUid'] ?? widget.queueEntry['entryUid'] ?? _data['entryUid']) != null)
-                  'entryUid': (fullEntry['entryUid'] ?? widget.queueEntry['entryUid'] ?? _data['entryUid']),
-                ...minimalUpdate,
-                if (doctorName.isNotEmpty && doctorName != 'Unknown') 'doctorName': doctorName,
-                if (doctorId.isNotEmpty) 'doctorId': doctorId,
-                if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'createdByName': tokenBy,
-                if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'tokenBy': tokenBy,
-                if (createdBy.isNotEmpty) 'createdBy': createdBy,
-                if (fullEntry['patientName'] != null) 'patientName': fullEntry['patientName'],
-                if (fullEntry['name'] != null) 'name': fullEntry['name'],
-                if (fullEntry['patientCnic'] != null) 'patientCnic': fullEntry['patientCnic'],
-                if (fullEntry['cnic'] != null) 'cnic': fullEntry['cnic'],
-                if (fullEntry['guardianCnic'] != null) 'guardianCnic': fullEntry['guardianCnic'],
-                if (fullEntry['guardianName'] != null) 'guardianName': fullEntry['guardianName'],
-                if (fullEntry['campId'] != null) 'campId': fullEntry['campId'],
-                if (fullEntry['dispensaryId'] != null) 'dispensaryId': fullEntry['dispensaryId'],
-                if (fullEntry['dispensaryTag'] != null) 'dispensaryTag': fullEntry['dispensaryTag'],
-                if (fullEntry['session'] != null) 'session': fullEntry['session'],
-                if (medicines.isNotEmpty) 'medicines': medicines,
-                if (deductedBatches.isNotEmpty) 'deductedBatches': deductedBatches,
-              },
-            ));
-          } catch (_) {}
 
           final upperSerial = serial.trim().toUpperCase();
           final campDocKey = CampSessionService.getCampDateDocId(

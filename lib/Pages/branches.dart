@@ -2,6 +2,7 @@
 
 import 'dart:ui' as ui;
 import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/shadows.dart';
 import 'package:flutter/material.dart';
 import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
@@ -194,6 +195,9 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
   int _rowsPerPage = 10;
   String _chartRange = '7d'; // '7d', '14d', '30d', 'month'
   String _selectedCampFilter = 'all'; // 'all', 'haji', 'saddar'
+  // Hover changes repaint only the chart; a setState rebuilt the whole page
+  // (patient search scan, peak record lookup) on every mouse move.
+  final ValueNotifier<int?> _hoveredChartIndex = ValueNotifier<int?>(null);
   final TextEditingController _searchController = TextEditingController();
 
   @override
@@ -223,13 +227,13 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
   String? _cachedPerfKey;
   DateTime? _lastPerfComputeTime;
 
-  Map<String, dynamic> _computeRealPerformanceData(String branchId, String range) {
-    final curKey = '$branchId|$range|$_selectedCampFilter';
+  Map<String, dynamic> _computeRealPerformanceData(String branchId, String range, {List<Map<String, dynamic>>? extraRecords}) {
+    final curKey = '$branchId|$range|$_selectedCampFilter|${extraRecords?.length ?? 0}';
     final now = DateTime.now();
     if (_cachedPerfKey == curKey &&
         _cachedPerfData != null &&
         _lastPerfComputeTime != null &&
-        now.difference(_lastPerfComputeTime!).inSeconds < 30) {
+        now.difference(_lastPerfComputeTime!).inSeconds < 15) {
       return _cachedPerfData!;
     }
 
@@ -260,43 +264,94 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     }
 
     final targetB = branchId.toLowerCase().trim();
+    final seenSerials = <String>{};
+
+    void processRecord(Map<dynamic, dynamic> val) {
+      final b = (val['branchId'] ?? '').toString().toLowerCase().trim();
+      if (targetB != 'all' && b.isNotEmpty && !b.contains(targetB) && !targetB.contains(b)) {
+        return;
+      }
+      if (_selectedCampFilter != 'all') {
+        final matches = CampSessionService.matchesCamp(
+          selectedCamp: _selectedCampFilter,
+          dispensaryId: val['dispensaryId']?.toString(),
+          campId: val['campId']?.toString(),
+          dispensaryTag: val['dispensaryTag']?.toString(),
+          serial: (val['serial'] ?? val['tokenSerial'] ?? val['id'])?.toString(),
+        );
+        if (!matches) return;
+      }
+
+      final serial = (val['serial'] ?? val['tokenSerial'] ?? val['id'] ?? '').toString().trim().toUpperCase();
+      if (serial.isNotEmpty) {
+        // Serials are per-branch day counters: in the all-branches view the same
+        // serial at two branches is two tokens.
+        final dedupKey = (targetB == 'all' && b.isNotEmpty)
+            ? '${LocalStorageService.sanitizeBranchId(b, fallback: b)}|$serial'
+            : serial;
+        if (!seenSerials.add(dedupKey)) return;
+      }
+
+      var dk = (val['dateKey'] ?? val['date'] ?? '').toString().trim();
+      if (dk.contains('_')) {
+        dk = dk.split('_')[0];
+      }
+      if (serial.isNotEmpty && (dk.isEmpty || dk.length != 6)) {
+        final sdk = CampSessionService.getDateKeyFromSerial(serial);
+        if (sdk.isNotEmpty) dk = sdk;
+      }
+      if (dk.length > 6) {
+        try {
+          final parsed = DateTime.tryParse(dk);
+          if (parsed != null) {
+            dk = dfDdmmyy.format(parsed);
+          } else {
+            final alt = DateFormat('dd-MM-yyyy').tryParse(dk) ??
+                        DateFormat('dd/MM/yyyy').tryParse(dk) ??
+                        DateFormat('dd MMM yyyy').tryParse(dk);
+            if (alt != null) dk = dfDdmmyy.format(alt);
+          }
+        } catch (_) {}
+      }
+      if (dateIndexMap[dk] == null) {
+        final tsStr = (val['dispensedAt'] ?? val['createdAt'] ?? val['timestamp'])?.toString();
+        if (tsStr != null && tsStr.isNotEmpty) {
+          final parsed = DateTime.tryParse(tsStr);
+          if (parsed != null) {
+            final altDk = dfDdmmyy.format(parsed);
+            if (dateIndexMap.containsKey(altDk)) dk = altDk;
+          }
+        }
+      }
+
+      final idx = dateIndexMap[dk];
+      if (idx != null) {
+        tokensList[idx] += 1.0;
+        final status = (val['status'] ?? '').toString().toLowerCase();
+        final dStatus = (val['dispenseStatus'] ?? '').toString().toLowerCase();
+        if (status == 'completed' || status == 'prescribed' || dStatus == 'dispensed' || val['dispensedAt'] != null) {
+          prescList[idx] += 1.0;
+        }
+        if (dStatus == 'dispensed' || status == 'dispensed' || val['dispensedAt'] != null) {
+          dispList[idx] += 1.0;
+        }
+      }
+    }
 
     try {
       if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
         final box = Hive.box(LocalStorageService.entriesBox);
         for (final val in box.values) {
-          if (val is! Map) continue;
-          final b = (val['branchId'] ?? '').toString().toLowerCase().trim();
-          if (targetB != 'all' && b.isNotEmpty && !b.contains(targetB) && !targetB.contains(b)) {
-            continue;
-          }
-          if (_selectedCampFilter != 'all') {
-            final matches = CampSessionService.matchesCamp(
-              selectedCamp: _selectedCampFilter,
-              dispensaryId: val['dispensaryId']?.toString(),
-              campId: val['campId']?.toString(),
-              dispensaryTag: val['dispensaryTag']?.toString(),
-              serial: (val['serial'] ?? val['id'])?.toString(),
-            );
-            if (!matches) continue;
-          }
-
-          final dk = (val['dateKey'] ?? val['date'] ?? '').toString().trim();
-          final idx = dateIndexMap[dk];
-          if (idx != null) {
-            tokensList[idx] += 1.0;
-            final status = (val['status'] ?? '').toString().toLowerCase();
-            final dStatus = (val['dispenseStatus'] ?? '').toString().toLowerCase();
-            if (status == 'completed' || status == 'prescribed' || dStatus == 'dispensed' || val['dispensedAt'] != null) {
-              prescList[idx] += 1.0;
-            }
-            if (dStatus == 'dispensed' || status == 'dispensed' || val['dispensedAt'] != null) {
-              dispList[idx] += 1.0;
-            }
-          }
+          if (val is Map) processRecord(val);
         }
       }
     } catch (_) {}
+
+    if (extraRecords != null) {
+      for (final val in extraRecords) {
+        processRecord(val);
+      }
+    }
 
     final result = {
       'tokens': tokensList,
@@ -313,6 +368,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
   @override
   void dispose() {
     _searchController.dispose();
+    _hoveredChartIndex.dispose();
     super.dispose();
   }
 
@@ -599,8 +655,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
               var activeId = (widget.branchId != null && widget.branchId!.isNotEmpty && widget.branchId != 'all')
                   ? widget.branchId
                   : _selectedBranchId;
-              if (activeId == null || activeId.isEmpty || activeId == 'all') {
-                if (widget.initialBranchId != null && widget.initialBranchId!.isNotEmpty && widget.initialBranchId != 'all') {
+              if (activeId == null || activeId.isEmpty) {
+                if (widget.initialBranchId != null && widget.initialBranchId!.isNotEmpty) {
                   activeId = widget.initialBranchId;
                 }
               }
@@ -610,9 +666,9 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                   activeId = externalTabId;
                 }
               }
-              if (activeId == null || activeId.isEmpty || activeId == 'all') {
+              if (activeId == null || activeId.isEmpty) {
                 final localActive = LocalStorageService.getActiveBranchId();
-                if (localActive != null && localActive.isNotEmpty && localActive != 'all') {
+                if (localActive != null && localActive.isNotEmpty) {
                   activeId = localActive;
                 }
               }
@@ -756,12 +812,12 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     ],
                   ),
                 ),
-                if (!isNarrow) _buildHeaderActionButtons(context, t, dateRangeLabel),
+                if (!isNarrow) _buildHeaderActionButtons(context, t, dateRangeLabel, currentBranchId),
               ],
             ),
             if (isNarrow) ...[
               const SizedBox(height: 14),
-              _buildHeaderActionButtons(context, t, dateRangeLabel),
+              _buildHeaderActionButtons(context, t, dateRangeLabel, currentBranchId),
             ],
           ],
         );
@@ -769,23 +825,134 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     );
   }
 
-  Widget _buildHeaderActionButtons(BuildContext context, RoleThemeData t, String dateRangeLabel) {
+  Widget _buildDatePresetChip(String label, bool isSelected, VoidCallback onTap, RoleThemeData t) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: isSelected ? t.accent.withValues(alpha: 0.15) : t.bgCard,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected ? t.accent : t.bgRule,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11.5,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            color: isSelected ? t.accent : t.textSecondary,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderActionButtons(BuildContext context, RoleThemeData t, String dateRangeLabel, String currentBranchId) {
+    final range = ref.watch(branchDateRangeProvider);
+    final now = DateTime.now();
+    final todayStart = DateTime(now.year, now.month, now.day);
+    final isToday = range.isToday || (range.start != null && range.start!.isAtSameMomentAs(todayStart) && range.end != null && range.end!.isAtSameMomentAs(todayStart));
+    
+    final sevenDaysAgo = todayStart.subtract(const Duration(days: 7));
+    final is7Days = !isToday && range.start != null && range.start!.isAtSameMomentAs(sevenDaysAgo);
+
+    final monthStart = DateTime(now.year, now.month, 1);
+    final isThisMonth = !isToday && range.start != null && range.start!.isAtSameMomentAs(monthStart);
+
+    final thirtyDaysAgo = todayStart.subtract(const Duration(days: 30));
+    final is30Days = !isToday && !is7Days && !isThisMonth && range.start != null && range.start!.isAtSameMomentAs(thirtyDaysAgo);
+
+    final allTimeStart = DateTime(2025, 1, 1);
+    final isAllTime = !isToday && range.start != null && range.start!.isAtSameMomentAs(allTimeStart);
+
+    final isCustom = !isToday && !is7Days && !isThisMonth && !is30Days && !isAllTime;
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       physics: const BouncingScrollPhysics(),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Date Range Selector
+          _buildDatePresetChip("Today", isToday, () {
+            ref.read(branchDateRangeProvider.notifier).state = const DateRange();
+            setState(() => _currentPage = 1);
+          }, t),
+          const SizedBox(width: 6),
+          _buildDatePresetChip("7 Days", is7Days, () {
+            ref.read(branchDateRangeProvider.notifier).state = DateRange(
+              start: sevenDaysAgo,
+              end: todayStart,
+            );
+            setState(() => _currentPage = 1);
+          }, t),
+          const SizedBox(width: 6),
+          _buildDatePresetChip("This Month", isThisMonth, () {
+            ref.read(branchDateRangeProvider.notifier).state = DateRange(
+              start: monthStart,
+              end: todayStart,
+            );
+            setState(() => _currentPage = 1);
+          }, t),
+          const SizedBox(width: 6),
+          _buildDatePresetChip("30 Days", is30Days, () {
+            ref.read(branchDateRangeProvider.notifier).state = DateRange(
+              start: thirtyDaysAgo,
+              end: todayStart,
+            );
+            setState(() => _currentPage = 1);
+          }, t),
+          const SizedBox(width: 6),
+          _buildDatePresetChip("All Time", isAllTime, () {
+            ref.read(branchDateRangeProvider.notifier).state = DateRange(
+              start: allTimeStart,
+              end: todayStart,
+            );
+            setState(() => _currentPage = 1);
+          }, t),
+          const SizedBox(width: 8),
+          // Custom Date Range Selector
           OutlinedButton.icon(
             onPressed: () => _showDateRangePicker(context, t),
-            icon: Icon(Icons.calendar_today_rounded, size: 13, color: t.accent),
-            label: Text(dateRangeLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.textPrimary)),
+            icon: Icon(Icons.calendar_month_rounded, size: 13, color: isCustom ? t.accent : t.textSecondary),
+            label: Text(
+              isCustom ? dateRangeLabel : "Custom",
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: isCustom ? FontWeight.w800 : FontWeight.w600,
+                color: isCustom ? t.accent : t.textPrimary,
+              ),
+            ),
             style: OutlinedButton.styleFrom(
-              backgroundColor: t.bgCard,
-              side: BorderSide(color: t.bgRule),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              backgroundColor: isCustom ? t.accent.withValues(alpha: 0.12) : t.bgCard,
+              side: BorderSide(color: isCustom ? t.accent : t.bgRule),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Sync & Refresh Button
+          IconButton(
+            onPressed: () {
+              DispensaryNotifier.clearFetchCache();
+              ref.invalidate(dispensaryProvider(currentBranchId));
+              ref.invalidate(serialsSummaryProvider(currentBranchId));
+              ref.invalidate(branchesListProvider);
+              AppToast.show(message: 'Refreshing $_selectedBranchName data from Firestore...', kind: GToastKind.success);
+              setState(() {});
+            },
+            icon: Icon(Icons.sync_rounded, size: 16, color: t.accent),
+            tooltip: 'Sync & Refresh from Firestore',
+            style: IconButton.styleFrom(
+              backgroundColor: t.accent.withValues(alpha: 0.12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(color: t.accent.withValues(alpha: 0.3)),
+              ),
+              padding: const EdgeInsets.all(8),
             ),
           ),
         ],
@@ -969,13 +1136,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         color: t.bgCard,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule.withValues(alpha: 0.8), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? SoftPalette.gray900.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: GShadow.s2(isDark),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -987,14 +1148,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                 width: 42,
                 height: 42,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      badgeColor.withValues(alpha: 0.18),
-                      badgeColor.withValues(alpha: 0.06),
-                    ],
-                  ),
+                  color: badgeColor.withValues(alpha: 0.10),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: badgeColor.withValues(alpha: 0.25), width: 1),
                 ),
@@ -1121,7 +1275,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
 
   Widget _buildPerformanceChartCard(BuildContext context, RoleThemeData t, String branchId) {
     final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
-    final perfData = _computeRealPerformanceData(branchId, _chartRange);
+    final dispState = ref.watch(dispensaryProvider(branchId));
+    final perfData = _computeRealPerformanceData(branchId, _chartRange, extraRecords: dispState.records);
     final tokensData = (perfData['tokens'] as List<double>?) ?? [];
     final prescData = (perfData['prescriptions'] as List<double>?) ?? [];
     final dispData = (perfData['dispensary'] as List<double>?) ?? [];
@@ -1137,13 +1292,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         color: t.bgCard,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? SoftPalette.gray900.withValues(alpha: 0.3) : SoftPalette.gray900.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: GShadow.s1(isDark),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1186,50 +1335,121 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),
+          // Prominent total numbers and series indicators
           Wrap(
-            spacing: 12,
-            runSpacing: 6,
+            spacing: 10,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              _buildChartLegend("Tokens: $tokensTotal", SoftPalette.indigo500, t),
-              _buildChartLegend("Prescriptions: $prescTotal", SoftPalette.emerald350, t),
-              _buildChartLegend("Dispensed: $dispTotal", SoftPalette.amber300, t),
+              _buildTotalMetricBadge(
+                label: "Tokens",
+                count: tokensTotal,
+                color: SoftPalette.indigo500,
+                icon: Icons.confirmation_number_outlined,
+                t: t,
+              ),
+              _buildTotalMetricBadge(
+                label: "Prescriptions",
+                count: prescTotal,
+                color: SoftPalette.emerald350,
+                icon: Icons.medical_services_outlined,
+                t: t,
+              ),
+              _buildTotalMetricBadge(
+                label: "Dispensed",
+                count: dispTotal,
+                color: SoftPalette.amber300,
+                icon: Icons.medication_outlined,
+                t: t,
+              ),
+              _buildTotalMetricBadge(
+                label: "Total Activity",
+                count: tokensTotal + prescTotal + dispTotal,
+                color: t.accent,
+                icon: Icons.query_stats_rounded,
+                t: t,
+              ),
             ],
           ),
-          const SizedBox(height: 20),
-          SizedBox(
-            height: 180,
-            width: double.infinity,
-            child: CustomPaint(
-              painter: _PerformanceMultiLinePainter(
-                theme: t,
-                tokensColor: SoftPalette.indigo500,
-                prescriptionsColor: SoftPalette.emerald350,
-                dispensaryColor: SoftPalette.amber300,
-                tokensData: tokensData,
-                prescriptionsData: prescData,
-                dispensaryData: dispData,
-                dateLabels: labels,
-              ),
-            ),
+          const SizedBox(height: 18),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final w = constraints.maxWidth;
+              return MouseRegion(
+                onHover: (event) {
+                  final x = event.localPosition.dx;
+                  if (tokensData.length > 1) {
+                    final xStep = w / (tokensData.length - 1);
+                    final idx = (x / xStep).round().clamp(0, tokensData.length - 1);
+                    if (_hoveredChartIndex.value != idx) {
+                      _hoveredChartIndex.value = idx;
+                    }
+                  }
+                },
+                onExit: (_) {
+                  if (_hoveredChartIndex.value != null) {
+                    _hoveredChartIndex.value = null;
+                  }
+                },
+                child: SizedBox(
+                  height: 220,
+                  width: double.infinity,
+                  child: ValueListenableBuilder<int?>(
+                    valueListenable: _hoveredChartIndex,
+                    builder: (context, hovered, _) => CustomPaint(
+                    painter: _PerformanceMultiLinePainter(
+                      theme: t,
+                      tokensColor: SoftPalette.indigo500,
+                      prescriptionsColor: SoftPalette.emerald350,
+                      dispensaryColor: SoftPalette.amber300,
+                      tokensData: tokensData,
+                      prescriptionsData: prescData,
+                      dispensaryData: dispData,
+                      dateLabels: labels,
+                      hoveredIndex: hovered,
+                    ),
+                  ),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildChartLegend(String label, Color color, RoleThemeData t) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 8,
-          height: 8,
-          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-        ),
-        const SizedBox(width: 6),
-        Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: t.textSecondary)),
-      ],
+  Widget _buildTotalMetricBadge({
+    required String label,
+    required int count,
+    required Color color,
+    required IconData icon,
+    required RoleThemeData t,
+  }) {
+    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.16 : 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.35 : 0.25), width: 1.2),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 7),
+          Text(
+            "$label: ",
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.textSecondary),
+          ),
+          Text(
+            NumberFormat('#,###').format(count),
+            style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w900, color: color),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1409,13 +1629,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         color: t.bgCard,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? SoftPalette.gray900.withValues(alpha: 0.3) : SoftPalette.gray900.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        boxShadow: GShadow.s1(isDark),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1719,16 +1933,100 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
           else if (filtered.isEmpty)
             Center(
               child: Padding(
-                padding: const EdgeInsets.all(40),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: t.accent.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.calendar_today_outlined, size: 24, color: t.accent),
+                    ),
+                    const SizedBox(height: 14),
                     Text(
                       _searchQuery.isNotEmpty
                           ? "No matching records found for '$_searchQuery'"
-                          : "No patient records for the selected date range. Select 'Last 7 Days' from the calendar filter at the top to view earlier visits.",
-                      style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600, fontSize: 13),
+                          : "No patient records for the selected period",
+                      style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 15),
                       textAlign: TextAlign.center,
                     ),
+                    const SizedBox(height: 6),
+                    Text(
+                      _searchQuery.isNotEmpty
+                          ? "Check your spelling or reset filters to see all branch records."
+                          : "Today may have 0 tokens registered yet. Select a wider time window below to view recent clinic visits:",
+                      style: TextStyle(color: t.textSecondary, fontSize: 12.5),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_searchQuery.isEmpty) ...[
+                      const SizedBox(height: 18),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              final now = DateTime.now();
+                              final todayStart = DateTime(now.year, now.month, now.day);
+                              ref.read(branchDateRangeProvider.notifier).state = DateRange(
+                                start: todayStart.subtract(const Duration(days: 7)),
+                                end: todayStart,
+                              );
+                              setState(() => _currentPage = 1);
+                            },
+                            icon: const Icon(Icons.date_range_rounded, size: 14),
+                            label: const Text("View Last 7 Days"),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: t.accent,
+                              foregroundColor: SoftPalette.gray50,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              final now = DateTime.now();
+                              final todayStart = DateTime(now.year, now.month, now.day);
+                              ref.read(branchDateRangeProvider.notifier).state = DateRange(
+                                start: DateTime(now.year, now.month, 1),
+                                end: todayStart,
+                              );
+                              setState(() => _currentPage = 1);
+                            },
+                            icon: const Icon(Icons.calendar_month_rounded, size: 14),
+                            label: const Text("View This Month"),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: t.bgRule),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: () {
+                              final now = DateTime.now();
+                              final todayStart = DateTime(now.year, now.month, now.day);
+                              ref.read(branchDateRangeProvider.notifier).state = DateRange(
+                                start: DateTime(2025, 1, 1),
+                                end: todayStart,
+                              );
+                              setState(() => _currentPage = 1);
+                            },
+                            icon: const Icon(Icons.history_rounded, size: 14),
+                            label: const Text("View All Time"),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(color: t.bgRule),
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -2802,13 +3100,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         color: t.bg,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: t.bgRule),
-        boxShadow: [
-          BoxShadow(
-            color: SoftPalette.gray900.withValues(alpha: 0.03),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: GShadow.s1(Theme.of(context).brightness == Brightness.dark),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -3356,6 +3648,7 @@ class _PerformanceMultiLinePainter extends CustomPainter {
   final List<double> prescriptionsData;
   final List<double> dispensaryData;
   final List<String> dateLabels;
+  final int? hoveredIndex;
 
   const _PerformanceMultiLinePainter({
     required this.theme,
@@ -3366,17 +3659,22 @@ class _PerformanceMultiLinePainter extends CustomPainter {
     required this.prescriptionsData,
     required this.dispensaryData,
     required this.dateLabels,
+    this.hoveredIndex,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
+    final isDark = theme.isDarkCanvas || UserThemeService.isDarkMode();
     final gridPaint = Paint()
-      ..color = theme.bgRule.withValues(alpha: 0.5)
+      ..color = theme.bgRule.withValues(alpha: isDark ? 0.35 : 0.6)
       ..strokeWidth = 1;
+
+    // Available chart curve height (leaving 26px for date labels at bottom)
+    final h = size.height - 28;
 
     // Draw horizontal grid lines
     const gridLines = 4;
-    final yStep = (size.height - 24) / gridLines;
+    final yStep = h / gridLines;
     for (int i = 0; i <= gridLines; i++) {
       final y = i * yStep;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
@@ -3389,42 +3687,404 @@ class _PerformanceMultiLinePainter extends CustomPainter {
       if (v > maxVal) maxVal = v;
     }
 
+    // Leave comfortable margin at top so point number badges never clip off
     List<double> normalize(List<double> raw) {
-      return raw.map((v) => (1.0 - ((v / maxVal) * 0.85 + 0.05)).clamp(0.05, 0.95)).toList();
+      return raw.map((v) => (1.0 - ((v / maxVal) * 0.68 + 0.16)).clamp(0.06, 0.94)).toList();
     }
 
     final normTokens = normalize(tokensData);
     final normPresc = normalize(prescriptionsData);
     final normDisp = normalize(dispensaryData);
 
-    _drawSmoothCurve(canvas, size, normTokens, tokensColor, true);
-    _drawSmoothCurve(canvas, size, normPresc, prescriptionsColor, true);
-    _drawSmoothCurve(canvas, size, normDisp, dispensaryColor, true);
+    // Draw curves
+    _drawSmoothCurve(canvas, size, h, normTokens, tokensColor, true);
+    _drawSmoothCurve(canvas, size, h, normPresc, prescriptionsColor, true);
+    _drawSmoothCurve(canvas, size, h, normDisp, dispensaryColor, true);
 
     // Draw bottom date labels
     if (dateLabels.isNotEmpty) {
-      final int step = (dateLabels.length / 6).ceil().clamp(1, 10);
+      final int step = (dateLabels.length / 7).ceil().clamp(1, 10);
       final double xStep = size.width / (dateLabels.length - 1).clamp(1, 9999);
 
       for (int i = 0; i < dateLabels.length; i += step) {
         final tp = TextPainter(
           text: TextSpan(
             text: dateLabels[i],
-            style: TextStyle(fontSize: 9, color: theme.textTertiary),
+            style: TextStyle(
+              fontSize: 9.5,
+              fontWeight: FontWeight.w600,
+              color: theme.textSecondary.withValues(alpha: 0.8),
+            ),
           ),
           textDirection: ui.TextDirection.ltr,
         )..layout();
-        final double xPos = (i * xStep - (tp.width / 2)).clamp(0.0, size.width - tp.width);
-        tp.paint(canvas, Offset(xPos, size.height - 12));
+        final double xPos = (i * xStep - (tp.width / 2)).clamp(2.0, size.width - tp.width - 2.0);
+        tp.paint(canvas, Offset(xPos, size.height - 14));
       }
+    }
+
+    // Draw numbers on each point
+    _drawPointNumbers(canvas, size, h, normTokens, normPresc, normDisp);
+
+    // Draw hover indicator & inspection card if active
+    _drawHoverTooltip(canvas, size, h, normTokens, normPresc, normDisp);
+  }
+
+  void _drawPointNumbers(
+    Canvas canvas,
+    Size size,
+    double h,
+    List<double> normTokens,
+    List<double> normPresc,
+    List<double> normDisp,
+  ) {
+    final int n = tokensData.length;
+    if (n == 0) return;
+    final double xStep = size.width / (n - 1).clamp(1, 9999);
+    final isDark = theme.isDarkCanvas || UserThemeService.isDarkMode();
+
+    for (int i = 0; i < n; i++) {
+      if (hoveredIndex == i) continue; // Hover tooltip renders full breakdown
+
+      final x = i * xStep;
+      final tVal = tokensData[i].toInt();
+      final pVal = prescriptionsData[i].toInt();
+      final dVal = dispensaryData[i].toInt();
+
+      final yT = normTokens[i] * h;
+      final yP = normPresc[i] * h;
+      final yD = normDisp[i] * h;
+      final minY = [yT, yP, yD].reduce((a, b) => a < b ? a : b);
+
+      // Case 1: All three are zero
+      if (tVal == 0 && pVal == 0 && dVal == 0) {
+        _paintBadge(
+          canvas: canvas,
+          size: size,
+          x: x,
+          y: yT - 8,
+          text: '0',
+          textColor: theme.textTertiary.withValues(alpha: 0.5),
+          bgColor: Colors.transparent,
+          borderColor: Colors.transparent,
+          isZero: true,
+        );
+        continue;
+      }
+
+      // Case 2: All three series are equal and > 0
+      if (tVal == pVal && pVal == dVal) {
+        _paintBadge(
+          canvas: canvas,
+          size: size,
+          x: x,
+          y: yT - 16,
+          text: '$tVal',
+          textColor: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
+          bgColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+          borderColor: tokensColor.withValues(alpha: 0.65),
+          isBold: true,
+        );
+        continue;
+      }
+
+      // Case 3: Only one series has activity (> 0)
+      if (tVal > 0 && pVal == 0 && dVal == 0) {
+        _paintBadge(
+          canvas: canvas,
+          size: size,
+          x: x,
+          y: yT - 15,
+          text: 'T: $tVal',
+          textColor: tokensColor,
+          bgColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+          borderColor: tokensColor.withValues(alpha: 0.5),
+          isBold: true,
+        );
+        continue;
+      }
+      if (pVal > 0 && tVal == 0 && dVal == 0) {
+        _paintBadge(
+          canvas: canvas,
+          size: size,
+          x: x,
+          y: yP - 15,
+          text: 'Rx: $pVal',
+          textColor: prescriptionsColor,
+          bgColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+          borderColor: prescriptionsColor.withValues(alpha: 0.5),
+          isBold: true,
+        );
+        continue;
+      }
+      if (dVal > 0 && tVal == 0 && pVal == 0) {
+        _paintBadge(
+          canvas: canvas,
+          size: size,
+          x: x,
+          y: yD - 15,
+          text: 'D: $dVal',
+          textColor: dispensaryColor,
+          bgColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+          borderColor: dispensaryColor.withValues(alpha: 0.5),
+          isBold: true,
+        );
+        continue;
+      }
+
+      // Case 4: Multiple non-zero values that differ:
+      // Render clean, non-overlapping multi-value pill above highest point
+      final spans = <InlineSpan>[];
+      if (tVal > 0) {
+        spans.add(TextSpan(
+          text: 'T:$tVal',
+          style: TextStyle(
+            color: tokensColor,
+            fontWeight: FontWeight.w800,
+            fontSize: 9.5,
+          ),
+        ));
+      }
+      if (pVal > 0) {
+        if (spans.isNotEmpty) spans.add(const TextSpan(text: '  ', style: TextStyle(fontSize: 8)));
+        spans.add(TextSpan(
+          text: 'Rx:$pVal',
+          style: TextStyle(
+            color: prescriptionsColor,
+            fontWeight: FontWeight.w800,
+            fontSize: 9.5,
+          ),
+        ));
+      }
+      if (dVal > 0) {
+        if (spans.isNotEmpty) spans.add(const TextSpan(text: '  ', style: TextStyle(fontSize: 8)));
+        spans.add(TextSpan(
+          text: 'D:$dVal',
+          style: TextStyle(
+            color: dispensaryColor,
+            fontWeight: FontWeight.w800,
+            fontSize: 9.5,
+          ),
+        ));
+      }
+
+      final tp = TextPainter(
+        text: TextSpan(children: spans),
+        textDirection: ui.TextDirection.ltr,
+      )..layout();
+
+      final pillW = tp.width + 10;
+      final pillH = tp.height + 4;
+      final pillX = (x - pillW / 2).clamp(4.0, size.width - pillW - 4.0);
+      final pillY = (minY - 17).clamp(3.0, size.height - pillH - 3.0);
+
+      final rrect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(pillX, pillY, pillW, pillH),
+        const Radius.circular(6),
+      );
+      canvas.drawRRect(
+        rrect,
+        Paint()..color = isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+      );
+      canvas.drawRRect(
+        rrect,
+        Paint()
+          ..color = theme.bgRule.withValues(alpha: 0.7)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0,
+      );
+
+      tp.paint(
+        canvas,
+        Offset(pillX + (pillW - tp.width) / 2, pillY + (pillH - tp.height) / 2),
+      );
     }
   }
 
-  void _drawSmoothCurve(Canvas canvas, Size size, List<double> normalizedPoints, Color color, bool fillArea) {
+  void _drawHoverTooltip(
+    Canvas canvas,
+    Size size,
+    double h,
+    List<double> normTokens,
+    List<double> normPresc,
+    List<double> normDisp,
+  ) {
+    if (hoveredIndex == null) return;
+    final int idx = hoveredIndex!;
+    if (idx < 0 || idx >= tokensData.length) return;
+
+    final double xStep = size.width / (tokensData.length - 1).clamp(1, 9999);
+    final double x = idx * xStep;
+    final isDark = theme.isDarkCanvas || UserThemeService.isDarkMode();
+
+    // 1. Vertical indicator line
+    final linePaint = Paint()
+      ..color = theme.accent.withValues(alpha: isDark ? 0.45 : 0.35)
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    canvas.drawLine(Offset(x, 0), Offset(x, h), linePaint);
+
+    final tVal = tokensData[idx].toInt();
+    final pVal = prescriptionsData[idx].toInt();
+    final dVal = dispensaryData[idx].toInt();
+
+    final yT = normTokens[idx] * h;
+    final yP = normPresc[idx] * h;
+    final yD = normDisp[idx] * h;
+
+    // Highlight circles on each series dot
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    ringPaint.color = tokensColor;
+    canvas.drawCircle(Offset(x, yT), 5.5, ringPaint);
+    ringPaint.color = prescriptionsColor;
+    canvas.drawCircle(Offset(x, yP), 5.5, ringPaint);
+    ringPaint.color = dispensaryColor;
+    canvas.drawCircle(Offset(x, yD), 5.5, ringPaint);
+
+    // 2. Floating Tooltip Card
+    final dateStr = idx < dateLabels.length ? dateLabels[idx] : '';
+    final tooltipSpan = TextSpan(
+      children: [
+        if (dateStr.isNotEmpty)
+          TextSpan(
+            text: '$dateStr\n',
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w800,
+              color: isDark ? SoftPalette.gray100 : SoftPalette.slate900,
+            ),
+          ),
+        TextSpan(
+          text: 'Tokens: $tVal  ',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: tokensColor,
+          ),
+        ),
+        TextSpan(
+          text: 'Rx: $pVal  ',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: prescriptionsColor,
+          ),
+        ),
+        TextSpan(
+          text: 'Disp: $dVal',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: dispensaryColor,
+          ),
+        ),
+      ],
+    );
+
+    final tp = TextPainter(
+      text: tooltipSpan,
+      textAlign: TextAlign.center,
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+
+    final cardW = tp.width + 16;
+    final cardH = tp.height + 12;
+    final cardX = (x - cardW / 2).clamp(6.0, size.width - cardW - 6.0);
+    final minY = [yT, yP, yD].reduce((a, b) => a < b ? a : b);
+    var cardY = minY - cardH - 12;
+    if (cardY < 4) cardY = minY + 16;
+
+    final rrect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(cardX, cardY, cardW, cardH),
+      const Radius.circular(8),
+    );
+
+    canvas.drawRRect(
+      rrect.shift(const Offset(0, 3)),
+      Paint()
+        ..color = SoftPalette.gray900.withValues(alpha: isDark ? 0.45 : 0.12)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+    );
+
+    canvas.drawRRect(
+      rrect,
+      Paint()..color = isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+    );
+
+    canvas.drawRRect(
+      rrect,
+      Paint()
+        ..color = theme.accent.withValues(alpha: 0.35)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2,
+    );
+
+    tp.paint(
+      canvas,
+      Offset(cardX + (cardW - tp.width) / 2, cardY + (cardH - tp.height) / 2),
+    );
+  }
+
+  void _paintBadge({
+    required Canvas canvas,
+    required Size size,
+    required double x,
+    required double y,
+    required String text,
+    required Color textColor,
+    required Color bgColor,
+    required Color borderColor,
+    bool isZero = false,
+    bool isBold = false,
+  }) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontSize: isZero ? 8.5 : (isBold ? 10.5 : 9.5),
+          fontWeight: isZero ? FontWeight.w500 : (isBold ? FontWeight.w900 : FontWeight.w800),
+          color: textColor,
+          letterSpacing: -0.2,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+    )..layout();
+
+    final pillW = tp.width + (isZero ? 4 : 8);
+    final pillH = tp.height + (isZero ? 2 : 4);
+    final pillX = (x - pillW / 2).clamp(3.0, size.width - pillW - 3.0);
+    final pillY = (y - pillH / 2).clamp(2.0, size.height - pillH - 2.0);
+
+    if (bgColor != Colors.transparent) {
+      final rrect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(pillX, pillY, pillW, pillH),
+        const Radius.circular(6),
+      );
+      canvas.drawRRect(rrect, Paint()..color = bgColor);
+      if (borderColor != Colors.transparent) {
+        canvas.drawRRect(
+          rrect,
+          Paint()
+            ..color = borderColor
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.0,
+        );
+      }
+    }
+
+    tp.paint(
+      canvas,
+      Offset(pillX + (pillW - tp.width) / 2, pillY + (pillH - tp.height) / 2),
+    );
+  }
+
+  void _drawSmoothCurve(Canvas canvas, Size size, double h, List<double> normalizedPoints, Color color, bool fillArea) {
     if (normalizedPoints.isEmpty) return;
 
-    final h = size.height - 24;
-    final xStep = size.width / (normalizedPoints.length - 1);
+    final xStep = size.width / (normalizedPoints.length - 1).clamp(1, 9999);
 
     final path = Path();
     final fillPath = Path();
@@ -3457,7 +4117,7 @@ class _PerformanceMultiLinePainter extends CustomPainter {
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: [
-            color.withValues(alpha: 0.15),
+            color.withValues(alpha: 0.16),
             color.withValues(alpha: 0.0),
           ],
         ).createShader(Rect.fromLTWH(0, 0, size.width, h));

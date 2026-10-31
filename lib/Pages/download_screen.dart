@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xl;
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -972,6 +973,13 @@ class _DownloadScreenState extends State<DownloadScreen>
           final file = File(savePath);
           await file.writeAsBytes(jsonBytes, flush: true);
         } catch (_) {}
+      } else if (kIsWeb) {
+        // Web: saveFile with bytes starts the download and returns null; there
+        // is no temp directory, so getTempFilePath would throw "JSON failed".
+        if (mounted) {
+          _showSnack('✓ JSON Backup downloaded — $totalRecords total records', color: t.accent);
+        }
+        return;
       } else {
         savePath = await FileActionHelper.getTempFilePath(fileName, jsonBytes);
       }

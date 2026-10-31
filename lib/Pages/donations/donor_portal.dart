@@ -100,9 +100,16 @@ class _DonorPortalState extends State<DonorPortal> {
           .where('donorId', isEqualTo: donor.id)
           .get();
 
-      final List<DonationRecord> loadedDonations = donationsQuery.docs.map((doc) {
-        return DonationRecord.fromMap(doc.data(), doc.id);
-      }).toList();
+      // collectionGroup returns both the branches/{b}/donations copy and the
+      // top-level donations/ copy of each receipt; keep one per donation.
+      final seen = <String>{};
+      final List<DonationRecord> loadedDonations = [];
+      for (final doc in donationsQuery.docs) {
+        final data = doc.data();
+        final key = (data['localId'] ?? doc.id).toString();
+        if (!seen.add(key)) continue;
+        loadedDonations.add(DonationRecord.fromMap(data, doc.id));
+      }
 
       loadedDonations.sort((a, b) => b.date.compareTo(a.date));
 

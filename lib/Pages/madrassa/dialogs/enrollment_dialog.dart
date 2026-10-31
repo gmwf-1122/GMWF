@@ -38,9 +38,18 @@ void showAddStudentDialog(
           ? student.data() as Map<String, dynamic> 
           : Map<String, dynamic>.from(student as Map))
       : null;
-  final studentId = isEdit 
-      ? (student is DocumentSnapshot ? student.id : (student as Map)['id']?.toString() ?? '')
+  final String rawStudentId = isEdit 
+      ? (student is DocumentSnapshot 
+          ? student.id 
+          : ((student as Map)['id'] ?? (student as Map)['studentId'] ?? (student as Map)['docId'] ?? (student as Map)['localId'])?.toString() ?? '')
       : '';
+  final studentId = rawStudentId.contains('__std__') 
+      ? rawStudentId.split('__std__').last.trim() 
+      : rawStudentId.trim();
+
+  if (studentData != null && studentId.isNotEmpty) {
+    studentData['id'] = studentId;
+  }
 
   // Resolve creator's branch. Students created by a teacher must strictly be in that teacher's branch,
   // and guardians linked or created must inherit the exact same branch.
@@ -1589,20 +1598,7 @@ void showAddStudentDialog(
                         'branchId': effectiveBranch,
                         'data': gUpdates,
                       });
-                      unawaited(SyncService().triggerUpload());
-
-                      try {
-                        unawaited(FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
-                        unawaited(FirebaseFirestore.instance
-                            .collection('branches')
-                            .doc(effectiveBranch)
-                            .collection('users')
-                            .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
-                      } catch (_) {}
+                      unawaited(SyncService().triggerUpload(urgent: true));
                     } else if (usernameMatchedGuardian != null) {
                       gUid = usernameMatchedGuardian!['uid'];
                       final gUpdates = <String, dynamic>{
@@ -1637,20 +1633,7 @@ void showAddStudentDialog(
                         'branchId': effectiveBranch,
                         'data': gUpdates,
                       });
-                      unawaited(SyncService().triggerUpload());
-
-                      try {
-                        unawaited(FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
-                        unawaited(FirebaseFirestore.instance
-                            .collection('branches')
-                            .doc(effectiveBranch)
-                            .collection('users')
-                            .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
-                      } catch (_) {}
+                      unawaited(SyncService().triggerUpload(urgent: true));
                     } else if (linkAccount) {
                       final usernameInput = gUsernameCtrl.text.trim().toLowerCase();
                       final targetEmail = '$usernameInput@gmwf.com';
@@ -1728,19 +1711,6 @@ void showAddStudentDialog(
                         'data': gUpdates,
                       });
                       unawaited(SyncService().triggerUpload(urgent: true));
-
-                      try {
-                        unawaited(FirebaseFirestore.instance
-                            .collection('users')
-                            .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
-                        unawaited(FirebaseFirestore.instance
-                            .collection('branches')
-                            .doc(effectiveBranch)
-                            .collection('users')
-                            .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
-                      } catch (_) {}
                     }
                   }
 
@@ -1887,24 +1857,7 @@ void showAddStudentDialog(
                               'branchId': selectedBranch,
                               'data': map,
                             });
-                            unawaited(SyncService().triggerUpload());
-
-                            try {
-                              unawaited(FirebaseFirestore.instance
-                                  .collection('users')
-                                  .doc(gUid)
-                                  .set({
-                                    'studentIds': studentIds,
-                                    'branchId': selectedBranch,
-                                    'role': 'Madrassa Guardian',
-                                  }, SetOptions(merge: true)).catchError((_) {}));
-                              unawaited(FirebaseFirestore.instance
-                                  .collection('branches')
-                                  .doc(selectedBranch)
-                                  .collection('users')
-                                  .doc(gUid)
-                                  .set(map, SetOptions(merge: true)).catchError((_) {}));
-                            } catch (_) {}
+                            unawaited(SyncService().triggerUpload(urgent: true));
                             break;
                           }
                         }

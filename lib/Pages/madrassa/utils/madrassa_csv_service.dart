@@ -300,7 +300,8 @@ class MadrassaCsvService {
       type: FileType.custom,
       allowedExtensions: ['csv'],
     );
-    return result == null ? 0 : 1;
+    // On web saveFile downloads the file and always returns null.
+    return (kIsWeb || result != null) ? 1 : 0;
   }
 
   static Future<int> exportAll(String branchId) async {

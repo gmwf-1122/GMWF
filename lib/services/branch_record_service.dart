@@ -52,6 +52,7 @@ class BranchRecordData {
 
 class BranchRecordService {
   static final Map<String, BranchRecordData> _memoryCache = {};
+  static final Set<String> _rescannedThisSession = {};
   static final Set<String> _pendingAsyncComputes = {};
   static DateTime? _lastComputeTime;
 
@@ -87,6 +88,9 @@ class BranchRecordService {
       if (sUpper.contains('SADD') || sUpper.contains('HAJI') || sUpper.contains('KAP') || sUpper.contains('HC')) return true;
     }
     if (b2.contains('gujrat')) {
+      if (sUpper.contains('SADD') || sUpper.contains('HAJI') || sUpper.contains('KAP') || sUpper.contains('HC') || sUpper.contains('JLJ') || sUpper.contains('SKT')) {
+        return false;
+      }
       if (b1.contains('gujrat') || b1.contains('grt')) return true;
       if (sUpper.contains('GRT') || sUpper.contains('GJT')) return true;
     }
@@ -156,16 +160,24 @@ class BranchRecordService {
         final raw = bBox.get(peakStorageKey);
         if (raw is Map) {
           storedPeak = SingleRecord.fromMap(Map<String, dynamic>.from(raw));
-          // Auto-heal: Purge corrupted 119 multi-day sum for Gujrat (user noted Gujrat never reached 40)
-          if (normBranch.contains('gujrat') && storedPeak.count >= 40) {
-            bBox.delete(peakStorageKey);
-            storedPeak = const SingleRecord(count: 22, dateKey: '050926', dateFormatted: '05-Sep-2026');
-            _persistPeakToBranchCache(peakStorageKey, storedPeak);
-          }
-          // Ensure Karachi collective peak reflects > 160
-          if ((normBranch == 'karachi' || normBranch == 'global') && (normCamp == null || normCamp == 'all') && storedPeak.count < 163) {
-            storedPeak = const SingleRecord(count: 163, dateKey: '090926', dateFormatted: '09-Sep-2026');
-            _persistPeakToBranchCache(peakStorageKey, storedPeak);
+          // One-time corrections of known-bad stored peaks. They ran on every read,
+          // so a real new Gujrat record of 40+ was wiped back to 31 within seconds.
+          final healFlag = 'peak_heal_v1|$peakStorageKey';
+          if (bBox.get(healFlag) != true) {
+            // Gujrat authentic record (31 tokens on 20-Oct-2026)
+            if (normBranch.contains('gujrat')) {
+              if (storedPeak.count < 31 || storedPeak.count >= 40) {
+                bBox.delete(peakStorageKey);
+                storedPeak = const SingleRecord(count: 31, dateKey: '201026', dateFormatted: '20-Oct-2026');
+                _persistPeakToBranchCache(peakStorageKey, storedPeak);
+              }
+            }
+            // Karachi collective peak (163 on 09-Sep-2026)
+            if ((normBranch == 'karachi' || normBranch == 'global') && (normCamp == null || normCamp == 'all') && storedPeak.count < 163) {
+              storedPeak = const SingleRecord(count: 163, dateKey: '090926', dateFormatted: '09-Sep-2026');
+              _persistPeakToBranchCache(peakStorageKey, storedPeak);
+            }
+            bBox.put(healFlag, true);
           }
           // Auto-heal: Purge false peak record for Haji Camp if mistakenly recorded today with Saddar's tokens
           if (normBranch.contains('karachi') && normCamp != null && normCamp.contains('haji') && storedPeak.dateKey == todayDk) {
@@ -175,6 +187,21 @@ class BranchRecordService {
         }
       }
     } catch (_) {}
+
+    // 3a. A stored peak only grew when this PC's live count passed it, so a higher
+    //     day that arrived later (synced from other desks, or a day this screen
+    //     wasn't open) never replaced it. Rescan history once per session and keep
+    //     the higher of the two — never lower it, old local entries get pruned.
+    if (storedPeak != null && storedPeak.count > 0 &&
+        Hive.isBoxOpen(LocalStorageService.entriesBox) && _rescannedThisSession.add(cacheKey)) {
+      try {
+        final computed = _computeFromOpenEntriesBox(normBranch, normCamp, todayDk, todayFormatted).peakRecord;
+        if (computed.count > storedPeak.count && computed.dateKey != todayDk) {
+          storedPeak = computed;
+          _persistPeakToBranchCache(peakStorageKey, computed);
+        }
+      } catch (_) {}
+    }
 
     // 3. If persistent peak exists in branch_data_cache, evaluate against today
     if (storedPeak != null && storedPeak.count > 0) {

@@ -25,7 +25,7 @@ class DialogBlurManager extends NavigatorObserver {
         return Hive.box('app_settings').get('dialog_blur_enabled', defaultValue: false) as bool;
       }
     } catch (_) {}
-    return true;
+    return false;
   }
 
   @override
@@ -164,6 +164,7 @@ class BlurredUnderDialogBackground extends StatelessWidget {
       child: ValueListenableBuilder<bool>(
         valueListenable: DialogBlurManager.isDialogOpen,
         builder: (context, isDialogOpen, staticChild) {
+          if (!DialogBlurManager.isBlurEnabled) return staticChild ?? child;
           return TweenAnimationBuilder<double>(
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,

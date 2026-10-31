@@ -7,6 +7,7 @@ import 'package:hive/hive.dart';
 import 'camp_session_service.dart';
 import 'local_storage_service.dart';
 import 'finance_local_storage.dart';
+import 'firestore_rest_service.dart';
 import '../realtime/realtime_manager.dart';
 
 List<String> _dateStrings(DateTime start, DateTime end) {
@@ -415,32 +416,44 @@ Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, Str
   // 4. FALLBACK: Only query Firestore if local Hive is completely empty for this day
   try {
     final queues = ['zakat', 'non-zakat', 'gmwf'];
-    final dateDocs = CampSessionService.getAllCampDateDocIds(
-      branchId: normBranchId,
-      dateKey: ds,
-      selectedCamp: subDispensary,
-    );
+    final candidateBranches = <String>{};
+    if (normBranchId.isEmpty || normBranchId == 'all' || normBranchId == 'global') {
+      candidateBranches.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'jalalpurjattan', 'jalalpur_jattan']);
+    } else {
+      final canonical = LocalStorageService.sanitizeBranchId(normBranchId, fallback: normBranchId);
+      candidateBranches.addAll(CampSessionService.firestoreBranchIds(canonical));
+    }
+
     final futures = <Future<QuerySnapshot<Map<String, dynamic>>>>[];
     final queryQueues = <String>[];
-    for (final docKey in dateDocs) {
-      for (final q in queues) {
-        futures.add(FirebaseFirestore.instance
-            .collection('branches/$normBranchId/serials/$docKey/$q')
-            .get()
-            .timeout(const Duration(seconds: 4))
-            .catchError((_) => FirebaseFirestore.instance
-                .collection('_empty_')
-                .limit(0)
-                .get()));
-        queryQueues.add(q);
+    for (final fsBranch in candidateBranches) {
+      final dateDocs = CampSessionService.getAllCampDateDocIds(
+        branchId: fsBranch,
+        dateKey: ds,
+        selectedCamp: subDispensary,
+      );
+      for (final docKey in dateDocs) {
+        for (final q in queues) {
+          futures.add(FirebaseFirestore.instance
+              .collection('branches/$fsBranch/serials/$docKey/$q')
+              .get()
+              .timeout(const Duration(seconds: 12))
+              .catchError((_) => FirebaseFirestore.instance
+                  .collection('_empty_')
+                  .limit(0)
+                  .get()));
+          queryQueues.add(q);
+        }
       }
     }
 
     final snaps = await Future.wait(futures);
 
+    int foundDocsCount = 0;
     for (int i = 0; i < snaps.length; i++) {
       final q = queryQueues[i];
       final snap = snaps[i];
+      foundDocsCount += snap.docs.length;
       for (final doc in snap.docs) {
         final data = doc.data();
         final status = (data['status'] ?? '').toString().toLowerCase().trim();
@@ -465,6 +478,85 @@ Future<Map<String, int>> _getDailySerialsSummary(String branchId, String ds, Str
         if (q == 'zakat') zakatSerials.add(uniqueKey);
         else if (q == 'non-zakat') nonZakatSerials.add(uniqueKey);
         else gmwfSerials.add(uniqueKey);
+      }
+    }
+
+    // Fallback: Query REST if SDK returned 0 documents
+    if (foundDocsCount == 0) {
+      for (final fsBranch in candidateBranches) {
+        final dateDocs = CampSessionService.getAllCampDateDocIds(
+          branchId: fsBranch,
+          dateKey: ds,
+          selectedCamp: subDispensary,
+        );
+        for (final docKey in dateDocs) {
+          for (final q in queues) {
+            final docs = await FirestoreRestService.instance.fetchSerials(
+              branchId: fsBranch,
+              campDocKey: docKey,
+              queueType: q,
+            );
+            foundDocsCount += docs.length;
+            for (final data in docs) {
+              final status = (data['status'] ?? data['dispenseStatus'] ?? '').toString().toLowerCase().trim();
+              final syncStatus = (data['syncStatus'] ?? '').toString().toLowerCase().trim();
+              final isDeleted = data['isDeleted'] == true || status == 'deleted' || syncStatus == 'deleted' || status == 'void' || status == 'cancelled';
+              if (isDeleted) continue;
+
+              final rawSerial = (data['serial'] ?? data['id'] ?? '').toString().trim();
+              if (rawSerial.isEmpty) continue;
+
+              if (!_matchesSubDispensary(data, subDispensary, rawSerial)) continue;
+              if (!_matchesShift(data, shift)) continue;
+
+              final uniqueKey = '$fsBranch-$rawSerial';
+              if (localTokenMap.containsKey(uniqueKey)) continue;
+              localTokenMap[uniqueKey] = data;
+
+              final effectiveQ = (data['queueType'] ?? q).toString().toLowerCase().trim();
+              if (effectiveQ == 'zakat') {
+                zakatSerials.add(uniqueKey);
+              } else if (effectiveQ == 'non-zakat') {
+                nonZakatSerials.add(uniqueKey);
+              } else {
+                gmwfSerials.add(uniqueKey);
+              }
+            }
+          }
+        }
+
+        // Also check direct dispensary collection via REST
+        try {
+          final dispDocs = await FirestoreRestService.instance.fetchDispensary(
+            branchId: fsBranch,
+            dateKey: ds,
+          );
+          for (final data in dispDocs) {
+            final status = (data['status'] ?? data['dispenseStatus'] ?? '').toString().toLowerCase().trim();
+            final syncStatus = (data['syncStatus'] ?? '').toString().toLowerCase().trim();
+            final isDeleted = data['isDeleted'] == true || status == 'deleted' || syncStatus == 'deleted' || status == 'void' || status == 'cancelled';
+            if (isDeleted) continue;
+
+            final rawSerial = (data['serial'] ?? data['id'] ?? '').toString().trim();
+            if (rawSerial.isEmpty) continue;
+
+            if (!_matchesSubDispensary(data, subDispensary, rawSerial)) continue;
+            if (!_matchesShift(data, shift)) continue;
+
+            final uniqueKey = '$fsBranch-$rawSerial';
+            if (localTokenMap.containsKey(uniqueKey)) continue;
+            localTokenMap[uniqueKey] = data;
+
+            final effectiveQ = (data['queueType'] ?? 'zakat').toString().toLowerCase().trim();
+            if (effectiveQ == 'zakat') {
+              zakatSerials.add(uniqueKey);
+            } else if (effectiveQ == 'non-zakat') {
+              nonZakatSerials.add(uniqueKey);
+            } else {
+              gmwfSerials.add(uniqueKey);
+            }
+          }
+        } catch (_) {}
       }
     }
   } catch (e) {
@@ -554,7 +646,19 @@ Map<String, int> _buildSummaryFromTokenMap(
 Stream<Map<String, int>> serialsCountStream(String branchId, DateTime start, DateTime end, {String? subDispensary, String? shift}) {
   final normalizedBranch = branchId.toLowerCase().trim();
   if (normalizedBranch == 'all' || normalizedBranch == 'global') {
-    final branchMaps = FinanceLocalStorage.getAllBranches([]);
+    final branchMaps = FinanceLocalStorage.getAllKnownBranches([]);
+    final defaults = [
+      {'id': 'karachi', 'name': 'Karachi'},
+      {'id': 'gujrat', 'name': 'Gujrat'},
+      {'id': 'sialkot', 'name': 'Sialkot'},
+      {'id': 'rawalpindi', 'name': 'Rawalpindi'},
+      {'id': 'jalalpurjattan', 'name': 'Jalalpur Jattan'},
+    ];
+    for (final d in defaults) {
+      if (!branchMaps.any((b) => (b['id'] ?? '').toString().toLowerCase() == d['id'])) {
+        branchMaps.add(Map<String, dynamic>.from(d));
+      }
+    }
     try {
       if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
         final box = Hive.box(LocalStorageService.branchesBox);
@@ -648,9 +752,7 @@ Stream<Map<String, int>> _serialsCountStreamForBranch(String branchId, DateTime 
 
   if (!hasToday) {
     var stream = Stream.fromFuture(pastSummaryFuture);
-    if (initialCached != null) {
-      stream = stream.startWith(initialCached);
-    }
+    stream = stream.startWith(initialCached ?? const <String, int>{});
     return stream.asBroadcastStream();
   }
 
@@ -693,9 +795,7 @@ Stream<Map<String, int>> _serialsCountStreamForBranch(String branchId, DateTime 
     liveStream = Rx.merge([liveStream, trigger]);
   }
 
-  if (initialCached != null) {
-    liveStream = liveStream.startWith(initialCached);
-  }
+  liveStream = liveStream.startWith(initialCached ?? const <String, int>{});
 
   return liveStream.asBroadcastStream();
 }
@@ -704,7 +804,7 @@ Stream<Map<String, Map<String, int>>> facilityShiftBreakdownStream(String branch
   // OPTIMIZATION: Instead of launching 9 distinct streams (which spawned 27
   // concurrent Firestore listeners), we run a single unified stream for the
   // branch and compute the 9 sub-totals in memory!
-  return _serialsCountStreamForBranch(branchId, start, end, subDispensary: 'all', shift: 'all').map((summary) {
+  return serialsCountStream(branchId, start, end, subDispensary: 'all', shift: 'all').map((summary) {
     // If the branch stream already contains the breakdown or local cached counts
     final total = summary['total'] ?? 0;
 

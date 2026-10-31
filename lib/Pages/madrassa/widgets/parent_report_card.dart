@@ -4544,6 +4544,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     required bool ptmClaimed,
     required bool isPtmToday,
     required bool hasPtmStatus,
+    bool isLate = false,
+    String? arrivalTime,
     bool isBeforeJoin = false,
     bool forceSquare = false,
     bool isToday = false,
@@ -4561,8 +4563,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       attValue = context.isUrdu ? 'تعطیل' : 'Holiday';
       attColor = SoftPalette.teal500; // Teal
     } else if (currentStatus == 'present') {
-      attValue = context.t('Present');
-      attColor = ParentReportCard.successColor;
+      if (isLate) {
+        attValue = (arrivalTime != null && arrivalTime.isNotEmpty)
+            ? (context.isUrdu ? 'حاضر (تاخیر - $arrivalTime)' : 'Present (Late - $arrivalTime)')
+            : (context.isUrdu ? 'حاضر (تاخیر)' : 'Present (Late)');
+        attColor = SoftPalette.amber400;
+      } else {
+        attValue = context.t('Present');
+        attColor = ParentReportCard.successColor;
+      }
     } else if (currentStatus == 'leave' || currentStatus == 'leave_requested') {
       attValue = context.t('Leave');
       attColor = SoftPalette.amber300;
@@ -5409,6 +5418,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     required Widget nearingBanner,
   }) {
     final selectedDateStatus = selectedDateLog['attendance']?.toString() ?? 'unknown';
+    final selectedDateIsLate = selectedDateLog['isLate'] == true || selectedDateLog['timing'] == 'late';
+    final selectedDateArrivalTime = selectedDateLog['arrivalTime']?.toString();
     final selectedDateLeaveStatus = selectedDateLog['leaveStatus'] ?? 'pending';
     final selectedDateUniform = selectedDateLog['uniform'] == true;
     final selectedDateReplied = selectedDateLog['parentReplied'] == true;
@@ -5486,6 +5497,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       ptmClaimed: selectedDatePtmClaimed,
       isPtmToday: isPtmForSelectedDate,
       hasPtmStatus: selectedDatePtmRecorded,
+      isLate: selectedDateIsLate,
+      arrivalTime: selectedDateArrivalTime,
       isBeforeJoin: isSelectedBeforeJoin,
       isToday: isSelectedToday,
       isHoliday: selectedDateIsHoliday,
@@ -5709,6 +5722,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         ptmClaimed: selectedDatePtmClaimed,
         isPtmToday: isPtmForSelectedDate,
         hasPtmStatus: selectedDatePtmRecorded,
+        isLate: selectedDateIsLate,
+        arrivalTime: selectedDateArrivalTime,
         isBeforeJoin: isSelectedBeforeJoin,
         forceSquare: true,
         isToday: isSelectedToday,
@@ -5815,6 +5830,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         ptmClaimed: selectedDatePtmClaimed,
         isPtmToday: isPtmForSelectedDate,
         hasPtmStatus: selectedDatePtmRecorded,
+        isLate: selectedDateIsLate,
+        arrivalTime: selectedDateArrivalTime,
         isBeforeJoin: isSelectedBeforeJoin,
         forceSquare: true,
         isToday: isSelectedToday,

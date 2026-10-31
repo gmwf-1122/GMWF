@@ -12,6 +12,7 @@ import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import '../quota_service.dart';
+import '../firebase_session_guard.dart';
 import 'sync_log.dart';
 import 'lan_firestore_gate.dart';
 
@@ -38,7 +39,13 @@ class CloudDb {
   CloudDb._();
   static final CloudDb instance = CloudDb._();
 
+  /// Error text of a dispensary write refused on a LAN desk (SyncService sets such items aside).
+  static const String lanDeskRefusal = 'LAN desk: the LAN server uploads this';
+
   FirebaseFirestore get sdk => FirebaseFirestore.instance;
+
+  Future<void> enableNetwork() => sdk.enableNetwork();
+  Future<void> disableNetwork() => sdk.disableNetwork();
 
   CloudCollection collection(String path) => CloudCollection._(this, path);
   CloudDoc doc(String path) => CloudDoc._(this, path);
@@ -82,6 +89,7 @@ class CloudDb {
   static String? _restDisabledReason;
 
   bool get _useRest {
+    if (kIsWeb) return false;
     if (_restDisabledReason != null) return false;
     try {
       if (Hive.isBoxOpen('app_flags') &&
@@ -90,6 +98,22 @@ class CloudDb {
       }
     } catch (_) {}
     return true;
+  }
+
+  static bool _isDispensaryPath(String path) {
+    final parts = path.toLowerCase().split('/');
+    const dispCols = {
+      'patients',
+      'serials',
+      'prescriptions',
+      'inventory',
+      'medicines',
+      'stock',
+      'camps',
+      'doctor_templates',
+      'medicine_restrictions',
+    };
+    return parts.any((p) => dispCols.contains(p));
   }
 
   // ── Sending ───────────────────────────────────────────────────────────────
@@ -104,13 +128,15 @@ class CloudDb {
         message: 'Daily write quota used up — waiting for the reset',
       );
     }
-    // A dispensary desk on the LAN never writes to Firestore itself: the LAN server uploads.
+    // A dispensary desk on the LAN never writes dispensary records to Firestore itself: the LAN server uploads.
     // 'unavailable' is treated like being offline, so queued items wait rather than fail.
-    if (LanFirestoreGate.active || LanFirestoreGate.isLanDesk) {
+    // Standalone collections (madrassa_students, madrassa_daily_logs, school_students, donations, users, etc.) are never blocked.
+    final hasDispensaryWrite = writes.any((w) => _isDispensaryPath(w.path));
+    if (hasDispensaryWrite && (LanFirestoreGate.active || LanFirestoreGate.isLanDesk)) {
       throw FirebaseException(
         plugin: 'cloud_firestore',
         code: 'unavailable',
-        message: 'LAN desk: the LAN server uploads this',
+        message: lanDeskRefusal,
       );
     }
 
@@ -142,6 +168,14 @@ class CloudDb {
       await _sendViaSdk(writes);
       _recordSuccess(writes, ctx);
       return;
+    } catch (e) {
+      if (kIsWeb || e is UnsupportedError || e.toString().contains('Unsupported') || e.toString().contains('HttpClient')) {
+        _restDisabledReason = 'REST not supported on this platform';
+        await _sendViaSdk(writes);
+        _recordSuccess(writes, ctx);
+        return;
+      }
+      rethrow;
     }
     _recordSuccess(writes, ctx);
     if (fpPath != null && fpHash != null) {
@@ -211,7 +245,19 @@ class CloudDb {
   }
 
   Future<Map<String, String>> _authHeaders({bool forceRefresh = false}) async {
-    final user = FirebaseAuth.instance.currentUser;
+    var user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      try {
+        await FirebaseSessionGuard.ensureSession(reason: 'cloud_db_auth').timeout(const Duration(seconds: 6));
+        user = FirebaseAuth.instance.currentUser;
+      } catch (_) {}
+      if (user == null) {
+        try {
+          await FirebaseAuth.instance.signInAnonymously().timeout(const Duration(seconds: 4));
+          user = FirebaseAuth.instance.currentUser;
+        } catch (_) {}
+      }
+    }
     if (user == null) return const {};
     final token = await user.getIdToken(forceRefresh).timeout(const Duration(seconds: 10));
     if (token == null || token.isEmpty) return const {};

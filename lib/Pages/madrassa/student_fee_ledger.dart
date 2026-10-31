@@ -7,7 +7,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../../services/local_storage_service.dart';
-import '../../realtime/realtime_manager.dart';
 import 'utils/madrassa_local_storage.dart';
 
 class StudentFeeLedgerScreen extends StatefulWidget {
@@ -101,10 +100,20 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
     return months[month - 1];
   }
 
+  /// Amount already paid for [year]/[month] (running total stored on the record).
+  double _priorPaidFor(int year, int month) {
+    if (!Hive.isBoxOpen(LocalStorageService.madrassaFeesBox)) return 0.0;
+    final key = '${MadrassaLocalStorage.normalizeBranch(widget.branchId.toLowerCase().trim())}'
+        '__fee__${year}_${month}__${widget.studentId}';
+    final existing = Hive.box(LocalStorageService.madrassaFeesBox).get(key);
+    return existing is Map ? ((existing['amountPaid'] as num?)?.toDouble() ?? 0.0) : 0.0;
+  }
+
   Future<void> _recordPaymentDialog() async {
     final double initialFee = (widget.monthlyFee ?? _studentData?['monthlyFee'] ?? 0.0).toDouble();
     final totalFeeCtrl = TextEditingController(text: initialFee > 0 ? initialFee.toStringAsFixed(0) : '0');
-    final amountCtrl = TextEditingController(text: initialFee > 0 ? initialFee.toStringAsFixed(0) : '0');
+    final dueNow = (initialFee - _priorPaidFor(_selectedYear, DateTime.now().month)).clamp(0.0, double.infinity);
+    final amountCtrl = TextEditingController(text: dueNow > 0 ? dueNow.toStringAsFixed(0) : '0');
     final discountCtrl = TextEditingController(text: '0');
     final noteCtrl = TextEditingController();
     int selectedMonth = DateTime.now().month;
@@ -118,7 +127,9 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
           final total = double.tryParse(totalFeeCtrl.text.trim()) ?? 0.0;
           final amount = double.tryParse(amountCtrl.text.trim()) ?? 0.0;
           final discount = double.tryParse(discountCtrl.text.trim()) ?? 0.0;
-          final remaining = (total - amount - discount).clamp(0.0, double.infinity);
+          // Earlier installments for the selected month count too (the save adds to them).
+          final priorPaid = _priorPaidFor(selectedYear, selectedMonth);
+          final remaining = (total - priorPaid - amount - discount).clamp(0.0, double.infinity);
           final isCleared = remaining <= 0.0;
 
           return AlertDialog(
@@ -300,31 +311,20 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () async {
-                  final feeKey = '${widget.branchId.toLowerCase().trim()}__fee__${selectedYear}_${selectedMonth}__${widget.studentId}';
                   final receiptId = 'REC-${DateTime.now().millisecondsSinceEpoch.toString().substring(6)}';
 
-                  final feeEntry = {
-                    'key': feeKey,
-                    'branchId': widget.branchId.toLowerCase().trim(),
-                    'studentId': widget.studentId,
-                    'studentName': widget.studentName ?? _studentData?['name'] ?? 'Student',
-                    'fatherName': widget.fatherName ?? _studentData?['fatherName'] ?? '',
-                    'year': selectedYear,
-                    'month': selectedMonth,
-                    'amountPaid': amount,
-                    'discount': discount,
-                    'totalFee': total,
-                    'amountDue': total,
-                    'balanceDue': remaining,
-                    'paymentMethod': paymentMethod,
-                    'receiptId': receiptId,
-                    'notes': noteCtrl.text.trim(),
-                    'paidAt': DateTime.now().toIso8601String(),
-                    'status': isCleared ? 'Paid' : (amount > 0 || discount > 0 ? 'Partial' : 'Unpaid'),
-                  };
-
+                  // amountPaid is a running total for the month (monthly report
+                  // reads it that way): add this installment to what was already
+                  // paid instead of replacing it. The save below keeps the
+                  // record's auditLog and broadcasts it on the LAN.
                   final box = await LocalStorageService.ensureBoxOpen(LocalStorageService.madrassaFeesBox);
-                  await box.put(feeKey, feeEntry);
+                  final existingKey = '${MadrassaLocalStorage.normalizeBranch(widget.branchId.toLowerCase().trim())}'
+                      '__fee__${selectedYear}_${selectedMonth}__${widget.studentId}';
+                  final existing = box.get(existingKey);
+                  final priorPaid = existing is Map ? ((existing['amountPaid'] as num?)?.toDouble() ?? 0.0) : 0.0;
+                  final totalPaid = priorPaid + amount;
+                  final balance = (total - totalPaid - discount).clamp(0.0, double.infinity);
+                  final cleared = balance <= 0.0;
 
                   // Unified sync and audit log recording
                   await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
@@ -335,25 +335,18 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
                     year: selectedYear,
                     month: selectedMonth,
                     amountDue: total,
-                    amountPaid: amount,
+                    amountPaid: totalPaid,
                     discount: discount,
-                    balanceDue: remaining,
+                    balanceDue: balance,
                     paymentMethod: paymentMethod,
                     receiptId: receiptId,
-                    status: isCleared ? 'paid' : (amount > 0 || discount > 0 ? 'partial' : 'unpaid'),
+                    status: cleared ? 'paid' : (totalPaid > 0 || discount > 0 ? 'partial' : 'unpaid'),
                     markedBy: 'HQ Manager',
                     markedByRole: 'hq manager',
                     note: noteCtrl.text.trim(),
                   );
 
-                  // Broadcast on LAN
-                  RealtimeManager().sendMessage({
-                    'event_type': 'madrassa_fee_paid',
-                    'branchId': widget.branchId,
-                    'data': feeEntry,
-                  });
-
-                  Navigator.of(ctx).pop(true);
+                  if (ctx.mounted) Navigator.of(ctx).pop(true);
                 },
                 child: const Text('Save & Print Receipt'),
               ),
@@ -365,8 +358,13 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
 
     if (result == true) {
       await _loadData();
-      if (_feeRecords.isNotEmpty) {
-        await _printReceipt(_feeRecords.first);
+      // Print the month just paid; _feeRecords.first is the latest month.
+      final paid = _feeRecords.firstWhere(
+        (r) => r['year'] == selectedYear && r['month'] == selectedMonth,
+        orElse: () => _feeRecords.isNotEmpty ? _feeRecords.first : const <String, dynamic>{},
+      );
+      if (paid.isNotEmpty) {
+        await _printReceipt(paid);
       }
     }
   }

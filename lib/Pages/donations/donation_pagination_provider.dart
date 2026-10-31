@@ -3,7 +3,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/donations_local_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../models/donation_models.dart';
-import 'donations_shared.dart';
 import 'package:flutter/foundation.dart'; // for kIsWeb
 import 'dart:async';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -58,6 +57,7 @@ class DonationPaginationNotifier
   bool _loading = false;
 
   StreamSubscription? _hiveSubscription;
+  Timer? _hiveDebounce;
 
   DonationPaginationNotifier({required this.branchId})
       : super(const AsyncValue.loading()) {
@@ -71,16 +71,21 @@ class DonationPaginationNotifier
   void _listenToHive() {
     _hiveSubscription?.cancel();
     _hiveSubscription = Hive.box(DonationsLocalStorage.donationsBox).watch().listen((event) {
-      if (!mounted) return;
-      final local = DonationsLocalStorage.getAllDonations(branchId);
-      final currentData = state.valueOrNull ?? [];
-      final merged = _dedup(currentData, local);
-      state = AsyncValue.data(merged);
+      // A download putAll fires one event per doc; rebuild once per burst.
+      _hiveDebounce?.cancel();
+      _hiveDebounce = Timer(const Duration(milliseconds: 300), () {
+        if (!mounted) return;
+        final local = DonationsLocalStorage.getAllDonations(branchId);
+        final currentData = state.valueOrNull ?? [];
+        final merged = _dedup(currentData, local);
+        state = AsyncValue.data(merged);
+      });
     });
   }
 
   @override
   void dispose() {
+    _hiveDebounce?.cancel();
     _hiveSubscription?.cancel();
     super.dispose();
   }
@@ -215,7 +220,8 @@ class DonationPaginationNotifier
     // Collect all local tombstones from Hive to prevent any resurrection
     final tombstoneLocalIds = <String>{};
     final tombstoneFsIds = <String>{};
-    final tombstoneReceipts = <String>{};
+    // Matched by id only: receipt numbers repeat (imported book numbers, two
+    // offline PCs, other branches), so a receipt match hid unrelated donations.
 
     if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
       final box = Hive.box(DonationsLocalStorage.donationsBox);
@@ -225,8 +231,6 @@ class DonationPaginationNotifier
           if (lId != null && lId.isNotEmpty) tombstoneLocalIds.add(lId);
           final fsId = v['firestoreId']?.toString();
           if (fsId != null && fsId.isNotEmpty) tombstoneFsIds.add(fsId);
-          final rClean = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
-          if (rClean.isNotEmpty) tombstoneReceipts.add(rClean);
         }
       }
     }
@@ -235,8 +239,6 @@ class DonationPaginationNotifier
       if (d.syncStatus == 'deleted' || d.status == 'deleted') return true;
       if (d.localId.isNotEmpty && tombstoneLocalIds.contains(d.localId)) return true;
       if (d.firestoreId != null && d.firestoreId!.isNotEmpty && tombstoneFsIds.contains(d.firestoreId)) return true;
-      final clean = cleanReceiptNumber(d.receiptNo);
-      if (clean.isNotEmpty && tombstoneReceipts.contains(clean)) return true;
       return false;
     }
 

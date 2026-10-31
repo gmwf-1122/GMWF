@@ -143,7 +143,7 @@ class FinanceReportHelper {
     Uint8List? bytes,
   }) async {
     String? initialDir;
-    if (Platform.isWindows) {
+    if (!kIsWeb && Platform.isWindows) {
       try {
         final downloads = await getDownloadsDirectory();
         if (downloads != null && downloads.existsSync()) {
@@ -169,7 +169,8 @@ class FinanceReportHelper {
       debugPrint('[FinanceReportHelper] pickSavePathFast error: $e');
     }
 
-    if (path != null && bytes != null && bytes.isNotEmpty) {
+    // On web, saveFile with bytes has already downloaded the file.
+    if (!kIsWeb && path != null && bytes != null && bytes.isNotEmpty) {
       try {
         final file = File(path);
         await file.writeAsBytes(bytes, flush: true);

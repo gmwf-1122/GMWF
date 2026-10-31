@@ -479,13 +479,13 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       LocalStorageService.saveLocalPrescription(data);
 
       dynamic entry;
+      dynamic actualKey;
       final cleanSerial = serial.trim();
+      final normBranch = widget.branchId.toLowerCase().trim();
+      final normSerial = cleanSerial.toLowerCase();
+      final upperSerial = cleanSerial.toUpperCase();
+      final box = Hive.box(LocalStorageService.entriesBox);
       if (cleanSerial.isNotEmpty) {
-        final normBranch = widget.branchId.toLowerCase().trim();
-        final normSerial = cleanSerial.toLowerCase();
-        final upperSerial = cleanSerial.toUpperCase();
-        final box = Hive.box(LocalStorageService.entriesBox);
-        dynamic actualKey;
         for (final k in [
           '$normBranch-$cleanSerial',
           '$normBranch-$upperSerial',
@@ -500,21 +500,29 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
             break;
           }
         }
-
+      }
+      // An older snapshot (LAN catch-up / replay) must not replace the doctor's later edit.
+      final isStale = entry is Map && LocalStorageService.isOlderPrescription(data, entry['prescription']);
+      if (cleanSerial.isNotEmpty && !isStale) {
         final updated = (entry != null && entry is Map)
             ? Map<String, dynamic>.from(entry)
             : <String, dynamic>{
                 'branchId': normBranch,
-                'serial': cleanSerial,
-                'tokenNumber': cleanSerial,
+                'serial': upperSerial,
+                'tokenNumber': upperSerial,
                 'dateKey': data['dateKey'] ?? DateTime.now().toIso8601String().substring(0, 10),
                 'createdAt': data['createdAt'] ?? DateTime.now().toIso8601String(),
               };
 
         updated['status'] = 'completed';
         updated['completedAt'] = data['completedAt'] ?? DateTime.now().toIso8601String();
-        updated['prescription'] = data;
+        updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
         updated['prescriptionId'] = data['id'] ?? cleanSerial;
+        final pMeds = data['prescriptions'] ?? data['medicines'] ?? data['items'];
+        if (pMeds != null) {
+          updated['prescriptions'] = pMeds;
+          updated['medicines'] = pMeds;
+        }
         if (data['patientName'] != null) updated['patientName'] = data['patientName'];
         if (data['name'] != null) updated['name'] = data['name'];
         if (data['patientCnic'] != null) updated['patientCnic'] = data['patientCnic'];

@@ -617,26 +617,6 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
       bool directWriteSucceeded = false;
       try {
         if (_branchId != null && _branchId!.isNotEmpty && LocalStorageService.isValidBranchId(_branchId)) {
-          final batch = FirebaseFirestore.instance.batch();
-          for (final t in tokensList) {
-            final tid = t['id'].toString();
-            final fsToken = {
-              'number': t['number'] ?? 1,
-              'session': t['session'] ?? _selectedSession,
-              'time': t['time'] != null
-                  ? Timestamp.fromDate(DateTime.tryParse(t['time'].toString()) ?? DateTime.now())
-                  : FieldValue.serverTimestamp(),
-              'issuedBy': t['issuedBy'] ?? _effectiveUserName,
-              'localId': tid,
-              'branchId': _branchId,
-              'dateKey': today,
-              'pricePerToken': _pricePerToken,
-              'syncStatus': 'synced',
-              'synced': true,
-            };
-            batch.set(_tokensCol.doc(tid), fsToken, SetOptions(merge: true));
-          }
-
           final dayUpdate = <String, dynamic>{
             'totalTokens': FieldValue.increment(quantity),
             'session_${_selectedSession}_total': FieldValue.increment(quantity),
@@ -646,23 +626,50 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             'dateKey': today,
             'branchId': _branchId,
           };
-          batch.set(_dayDoc, dayUpdate, SetOptions(merge: true));
-          await batch.commit().timeout(const Duration(seconds: 6));
+          // 1. Prioritize updating the day summary document first (1 fast write)
+          // so HQ Manager and Dashboard instantly see updated counts even on slow connections.
+          await _dayDoc.set(dayUpdate, SetOptions(merge: true)).timeout(const Duration(seconds: 4));
           directWriteSucceeded = true;
 
-          // Update local Hive tokens to synced status immediately
+          // 2. Write individual token docs (best effort; if interrupted or quota-tight, Sync queue handles remainder)
           try {
-            final tokenBox = await _getTokensBox();
+            final batch = FirebaseFirestore.instance.batch();
             for (final t in tokensList) {
               final tid = t['id'].toString();
-              final loc = tokenBox.get(tid);
-              if (loc is Map) {
-                await tokenBox.put(tid, Map<String, dynamic>.from(loc)
-                  ..['syncStatus'] = 'synced'
-                  ..['synced'] = true);
-              }
+              final fsToken = {
+                'number': t['number'] ?? 1,
+                'session': t['session'] ?? _selectedSession,
+                'time': t['time'] != null
+                    ? Timestamp.fromDate(DateTime.tryParse(t['time'].toString()) ?? DateTime.now())
+                    : FieldValue.serverTimestamp(),
+                'issuedBy': t['issuedBy'] ?? _effectiveUserName,
+                'localId': tid,
+                'branchId': _branchId,
+                'dateKey': today,
+                'pricePerToken': _pricePerToken,
+                'syncStatus': 'synced',
+                'synced': true,
+              };
+              batch.set(_tokensCol.doc(tid), fsToken, SetOptions(merge: true));
             }
-          } catch (_) {}
+            await batch.commit().timeout(const Duration(seconds: 6));
+
+            // Update local Hive tokens to synced status immediately
+            try {
+              final tokenBox = await _getTokensBox();
+              for (final t in tokensList) {
+                final tid = t['id'].toString();
+                final loc = tokenBox.get(tid);
+                if (loc is Map) {
+                  await tokenBox.put(tid, Map<String, dynamic>.from(loc)
+                    ..['syncStatus'] = 'synced'
+                    ..['synced'] = true);
+                }
+              }
+            } catch (_) {}
+          } catch (tokErr) {
+            debugPrint('[OfficeBoy] Individual tokens batch write deferred: $tokErr');
+          }
           debugPrint('[OfficeBoy] ✅ Direct Firestore write succeeded for batch $batchId');
         }
       } catch (e) {
@@ -923,14 +930,24 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             'reversedBatchIds': FieldValue.arrayUnion([revBatchId]),
             'lastUpdated': FieldValue.serverTimestamp(),
           };
-          sessionCounts.forEach((s, count) {
-            if (count > 0) {
-              dayUpdate['session_${s}_total'] = FieldValue.increment(-count);
+          sessionCounts.forEach((s, cnt) {
+            if (cnt > 0) {
+              dayUpdate['session_${s}_total'] = FieldValue.increment(-cnt);
             }
           });
-          batch.set(_dayDoc, dayUpdate, SetOptions(merge: true));
-          await batch.commit().timeout(const Duration(seconds: 6));
+          // Update summary first so HQ Manager reflects reversal immediately
+          await _dayDoc.set(dayUpdate, SetOptions(merge: true)).timeout(const Duration(seconds: 4));
           directVoidSucceeded = true;
+
+          try {
+            final batch = FirebaseFirestore.instance.batch();
+            for (final tid in voidIds) {
+              batch.delete(_tokensCol.doc(tid));
+            }
+            await batch.commit().timeout(const Duration(seconds: 6));
+          } catch (delErr) {
+            debugPrint('[OfficeBoy] Individual token delete deferred: $delErr');
+          }
           debugPrint('[OfficeBoy] ✅ Direct Firestore reversal write succeeded for $revBatchId');
         }
       } catch (e) {

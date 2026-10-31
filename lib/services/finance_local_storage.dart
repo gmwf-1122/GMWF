@@ -4157,19 +4157,14 @@ class FinanceLocalStorage {
       final spellings = _branchSpellings[LocalStorageService.sanitizeBranchId(clean, fallback: clean)];
       return spellings ?? [clean];
     }
+    final allKnown = {'gujrat', 'sialkot', 'rawalpindi', 'karachi', 'saddar', 'haji_camp', 'kapaya', 'jalalpurjattan'};
     final empBranches = employeesBox.values
         .whereType<Map>()
         .map((m) => (m['branchId'] ?? '').toString().trim().toLowerCase())
         .where((b) => b.isNotEmpty && b != 'all' && b != 'global')
-        .toSet()
-        .toList();
-    if (empBranches.isNotEmpty) {
-      if (empBranches.any((b) => b == 'karachi')) {
-        empBranches.addAll(['karachi', 'saddar', 'haji_camp', 'kapaya']);
-      }
-      return empBranches.toSet().toList();
-    }
-    return ['gujrat', 'sialkot', 'rawalpindi', 'karachi', 'saddar', 'haji_camp'];
+        .toSet();
+    allKnown.addAll(empBranches);
+    return allKnown.toList();
   }
 
   // ── Firestore Download Operations ─────────────────────────────────────────
@@ -4182,7 +4177,7 @@ class FinanceLocalStorage {
     try {
       final branches = _getKnownBranchIds(branchId);
       final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
-      for (final bId in branches) {
+      await Future.wait(branches.map((bId) async {
         try {
           final snap = await FirebaseFirestore.instance
               .collection('branches')
@@ -4191,7 +4186,7 @@ class FinanceLocalStorage {
               .get();
           docs.addAll(snap.docs);
         } catch (_) {}
-      }
+      }));
 
       final box = employeesBox;
       final Map<String, dynamic> updates = {};
@@ -4447,7 +4442,7 @@ class FinanceLocalStorage {
         }
       }
 
-      for (final bId in branches) {
+      await Future.wait(branches.map((bId) async {
         try {
           if (specificDateStr != null && specificDateStr.isNotEmpty) {
             final recSnap = await FirebaseFirestore.instance
@@ -4457,7 +4452,7 @@ class FinanceLocalStorage {
                 .doc(specificDateStr)
                 .collection('records')
                 .get()
-                .timeout(const Duration(seconds: 4));
+                .timeout(const Duration(seconds: 6));
 
             for (final doc in recSnap.docs) {
               processDoc(doc, specificDateStr);
@@ -4470,12 +4465,12 @@ class FinanceLocalStorage {
                 .where(FieldPath.documentId, isGreaterThanOrEqualTo: '$effectiveMonthKey-01')
                 .where(FieldPath.documentId, isLessThanOrEqualTo: '$effectiveMonthKey-31')
                 .get()
-                .timeout(const Duration(seconds: 4));
+                .timeout(const Duration(seconds: 6));
 
             await Future.wait(dateDocsSnap.docs.map((dateDoc) async {
               try {
                 final dStr = dateDoc.id;
-                final recSnap = await dateDoc.reference.collection('records').get().timeout(const Duration(seconds: 3));
+                final recSnap = await dateDoc.reference.collection('records').get().timeout(const Duration(seconds: 4));
                 for (final doc in recSnap.docs) {
                   processDoc(doc, dStr);
                 }
@@ -4490,12 +4485,12 @@ class FinanceLocalStorage {
                 .orderBy(FieldPath.documentId, descending: true)
                 .limit(fetchLimit)
                 .get()
-                .timeout(const Duration(seconds: 4));
+                .timeout(const Duration(seconds: 6));
 
             await Future.wait(dateDocsSnap.docs.map((dateDoc) async {
               try {
                 final dStr = dateDoc.id;
-                final recSnap = await dateDoc.reference.collection('records').get().timeout(const Duration(seconds: 3));
+                final recSnap = await dateDoc.reference.collection('records').get().timeout(const Duration(seconds: 4));
                 for (final doc in recSnap.docs) {
                   processDoc(doc, dStr);
                 }
@@ -4505,7 +4500,7 @@ class FinanceLocalStorage {
         } catch (be) {
           debugPrint('[FinanceLS] Branch $bId attendance download note: $be');
         }
-      }
+      }));
 
       if (updates.isNotEmpty) {
         await box.putAll(updates);

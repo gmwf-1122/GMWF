@@ -1,7 +1,6 @@
 import 'dart:math' as math;
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:gmwf/design/tokens/comfort_colors.dart';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../services/image_upload_service.dart';
@@ -165,12 +164,8 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
       backgroundColor: Colors.transparent,
       child: FadeTransition(
         opacity: _fadeAnim,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(24),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-            child: Container(
-              width: 480,
+        child: Container(
+          width: 480,
               decoration: BoxDecoration(
                 color: context.adapt(SoftPalette.gray50),
                 borderRadius: BorderRadius.circular(24),
@@ -712,9 +707,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
               ),
             ),
           ),
-        ),
-      ),
-    );
+        );
   }
 
   Widget _chip(IconData icon, String label) {

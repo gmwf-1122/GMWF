@@ -10,7 +10,6 @@
 // minute on large data — please don't close the app"), so long waits never feel like a hang.
 
 import 'dart:async';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../design/tokens/soft_palette.dart';
@@ -233,12 +232,10 @@ class _BlockingCard extends StatelessWidget {
 
     return Material(
       color: Colors.transparent,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 3, sigmaY: 3),
+      child: Container(
+        color: (isDark ? Colors.black : SoftPalette.slate900).withValues(alpha: 0.45),
+        alignment: Alignment.center,
         child: Container(
-          color: (isDark ? Colors.black : SoftPalette.slate900).withValues(alpha: 0.28),
-          alignment: Alignment.center,
-          child: Container(
             width: 360,
             padding: const EdgeInsets.fromLTRB(26, 26, 26, 22),
             decoration: BoxDecoration(
@@ -288,12 +285,26 @@ class _BlockingCard extends StatelessWidget {
                     ),
                   ),
                 ],
+                if (seconds >= 10) ...[
+                  const SizedBox(height: 14),
+                  TextButton(
+                    onPressed: () {
+                      task.end();
+                      BusyStatus.dismissAll();
+                    },
+                    style: TextButton.styleFrom(
+                      foregroundColor: SoftPalette.teal500,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    child: const Text('Dismiss Overlay', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  ),
+                ],
               ],
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 }
 

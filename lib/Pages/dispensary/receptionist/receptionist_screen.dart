@@ -982,7 +982,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     final now = DateTime.now();
     if (_cachedFilteredTokens != null &&
         _cachedTokensTime != null &&
-        now.difference(_cachedTokensTime!).inMilliseconds < 450 &&
+        now.difference(_cachedTokensTime!).inMilliseconds < 1200 &&
         _cachedTokensFilter == _selectedSessionFilter) {
       return _cachedFilteredTokens!;
     }
@@ -996,6 +996,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
       final rawEntries = lss.LocalStorageService.getLocalEntries(widget.branchId);
       final normBranch = widget.branchId.toLowerCase().trim();
+      // Once per rebuild, not per token: getActiveCamp reads (and may rewrite) the settings
+      // box and logs, and this list is rebuilt after every LAN message.
+      final targetCamp = !_hasMultiCamps
+          ? null
+          : ((_selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all')
+              ? _selectedCampFilter
+              : CampSessionService.getActiveCamp(widget.branchId));
 
     final filtered = rawEntries.where((e) {
       // 1. Date filter (strictly today only - no yesterday tokens regardless of status)
@@ -1038,9 +1045,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
       // 6. Strict Camp Filter (cannot see another camp's tokens)
       if (_hasMultiCamps) {
-        final targetCamp = (_selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all')
-            ? _selectedCampFilter
-            : CampSessionService.getActiveCamp(widget.branchId);
         if (targetCamp != null && targetCamp.isNotEmpty && targetCamp != 'all') {
           final matches = CampSessionService.matchesCamp(
             selectedCamp: targetCamp,
@@ -1121,6 +1125,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       final normBranch = widget.branchId.toLowerCase().trim();
 
       int all = 0, morning = 0, evening = 0, night = 0;
+      final targetCamp = !_hasMultiCamps
+          ? null
+          : ((_selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all')
+              ? _selectedCampFilter
+              : CampSessionService.getActiveCamp(widget.branchId));
 
       final Map<String, Map<String, dynamic>> uniqueBySerial = {};
       for (final e in rawEntries) {
@@ -1139,9 +1148,6 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         if (st == 'deleted' || syncSt == 'deleted') continue;
 
         if (_hasMultiCamps) {
-          final targetCamp = (_selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all')
-              ? _selectedCampFilter
-              : CampSessionService.getActiveCamp(widget.branchId);
           if (targetCamp != null && targetCamp.isNotEmpty && targetCamp != 'all') {
             final matches = CampSessionService.matchesCamp(
               selectedCamp: targetCamp,

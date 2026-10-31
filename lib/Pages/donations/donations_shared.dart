@@ -194,7 +194,7 @@ class DS {
       letterSpacing: 0.6);
   static TextStyle caption({Color color = ink500}) =>
       TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: color);
-  static TextStyle mono({Color color = ink900, double size = 20}) => GoogleFonts.dmMono(
+  static TextStyle mono({Color color = ink900, double size = 20}) => GoogleFonts.inter(
       fontSize: size, fontWeight: FontWeight.w800, color: color,
       fontFeatures: const [FontFeature.tabularFigures()],
       letterSpacing: -0.4);
@@ -1338,6 +1338,8 @@ Future<void> downloadTransactionsLedgerPdf(List<DonationRecord> donations, Strin
     // Use FilePicker for a direct save dialog on Windows
     final String? outputFile = await FilePicker.platform.saveFile(
       dialogTitle: 'Save Transactions Ledger',
+      // Android, iOS and web require the bytes and write the file themselves.
+      bytes: Uint8List.fromList(bytes),
       fileName: 'GMWF-Ledger-${branchName.replaceAll(' ', '_')}-${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
       type: FileType.custom,
       allowedExtensions: ['pdf'],
@@ -1345,7 +1347,7 @@ Future<void> downloadTransactionsLedgerPdf(List<DonationRecord> donations, Strin
 
     if (outputFile != null) {
       final file = File(outputFile);
-      await file.writeAsBytes(bytes);
+      if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS) await file.writeAsBytes(bytes);
       if (context.mounted) {
         AppToast.showSnackBar(context, SnackBar(content: Text('Ledger saved to: $outputFile'), backgroundColor: SoftPalette.green400));
       }
@@ -2696,9 +2698,9 @@ void showReceiptShareSheet(
                           style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: context.adapt(AppColors.gray900)))
                     else
                       Text('PKR ${NumberFormat('#,##0').format(amount)}',
-                          style: GoogleFonts.dmMono(fontSize: 32, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
+                          style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 32, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
                     const SizedBox(height: 4),
-                    Text('Receipt #$receiptNo', style: GoogleFonts.dmMono(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w700)),
+                    Text('Receipt #$receiptNo', style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w700)),
                   ],
                 ),
               ),

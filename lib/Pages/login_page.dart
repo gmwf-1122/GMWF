@@ -21,6 +21,7 @@ import '../services/role_simulator_service.dart';
 import '../services/auto_update_service.dart';
 import '../widgets/update_dialog_widget.dart';
 import '../services/camp_session_service.dart';
+import '../services/cloud/lan_firestore_gate.dart';
 import 'home_router.dart';
 import 'access_revoked_screen.dart';
 
@@ -147,27 +148,34 @@ class _LoginPageState extends State<LoginPage> {
     if (!kIsWeb && Platform.environment.containsKey('FLUTTER_TEST')) {
       return false;
     }
-    // 1. Direct DNS probes to Google and Firebase
+    // 1. Connectivity interface probe (check interface first)
+    bool hasInterface = false;
+    try {
+      final result = await Connectivity().checkConnectivity().timeout(const Duration(milliseconds: 1000));
+      hasInterface = result.any((r) => r != ConnectivityResult.none);
+    } catch (_) {}
+
+    // 2. Direct DNS probes to Google and Firebase with realistic mobile cellular timeouts
     try {
       final lookup = await InternetAddress.lookup('google.com')
-          .timeout(const Duration(milliseconds: 1200));
+          .timeout(const Duration(milliseconds: 2500));
       if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;
     } catch (_) {}
 
     try {
       final lookup = await InternetAddress.lookup('firebase.google.com')
-          .timeout(const Duration(milliseconds: 1200));
+          .timeout(const Duration(milliseconds: 2500));
       if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;
     } catch (_) {}
 
-    // 2. Connectivity interface probe
-    try {
-      final result = await Connectivity().checkConnectivity().timeout(const Duration(milliseconds: 800));
-      if (result.any((r) => r != ConnectivityResult.none)) return true;
-    } catch (_) {}
-
-    // 3. On desktop platforms, if interface is active or DNS probe had local delay,
+    // 3. If an active network interface (Wi-Fi or Mobile Cellular) is detected,
     // default to online so Firebase Auth can operate directly with its own timeout
+    // rather than prematurely forcing Android phones into offline mode
+    if (hasInterface) {
+      return true;
+    }
+
+    // 4. On desktop platforms, default to online
     if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       return true;
     }
@@ -258,6 +266,7 @@ class _LoginPageState extends State<LoginPage> {
     if (mounted) setState(() => _loading = true);
 
     try {
+      await (() async {
       // ── Local-first: credentials saved on this device → open the app instantly ──
       // Checking the device costs a few milliseconds; the online path below costs several
       // seconds (internet probe + dozens of Firestore queries + Firebase sign-in). Firebase
@@ -303,11 +312,15 @@ class _LoginPageState extends State<LoginPage> {
       _setLoginStep('login: Firebase sign-in', 'Verifying password');
       String email = '';
 
-      if (firestoreUserDoc != null && firestoreUserDoc['email'] != null && (firestoreUserDoc['email'] as String).isNotEmpty) {
-        email = (firestoreUserDoc['email'] as String).trim().toLowerCase();
-        debugPrint('[LoginPage] Resolved email from cloud search across both places: $email');
-      } else if (input.contains('@')) {
+      // A typed email is what Firebase Auth knows the account by. The profile's
+      // email can differ (edited later, or a made-up '…@gmd.com' when the doc
+      // has none), and signing in with it rejected correct passwords.
+      final profileEmail = (firestoreUserDoc?['email'] ?? '').toString().trim().toLowerCase();
+      if (input.contains('@')) {
         email = input.trim().toLowerCase();
+      } else if (profileEmail.contains('@')) {
+        email = profileEmail;
+        debugPrint('[LoginPage] Resolved email from cloud search across both places: $email');
       } else {
         // Fallback domain: attempt username@khi.com first
         email = '${input.trim().toLowerCase()}@khi.com';
@@ -317,6 +330,7 @@ class _LoginPageState extends State<LoginPage> {
       // 2. Attempt Firebase Auth sign-in with generous 12-second timeout
       UserCredential? cred;
       FirebaseAuthException? authException;
+      var authTimedOut = false;
       try {
         cred = await FirebaseAuth.instance
             .signInWithEmailAndPassword(
@@ -326,10 +340,10 @@ class _LoginPageState extends State<LoginPage> {
             .timeout(const Duration(seconds: 12));
       } on FirebaseAuthException catch (e) {
         authException = e;
-        debugPrint('[LoginPage] FirebaseAuthException: ${e.code}');
-        // Fallback domain attempts: check branch domains (@khi.com, @grt.com, @skt.com, etc.)
-        if (e.code == 'user-not-found' && !input.contains('@')) {
-          for (final domain in ['@khi.com', '@grt.com', '@skt.com', '@jlj.com', '@twt.com', '@gmwf.com', '@gmd.com', '@gmwf.org']) {
+        // Fallback domain attempts: check branch domains (@grt.com, @khi.com, @skt.com, etc.)
+        // Firebase Email Enumeration Protection returns 'invalid-credential' instead of 'user-not-found'
+        if ((e.code == 'user-not-found' || e.code == 'invalid-credential') && !input.contains('@')) {
+          for (final domain in ['@grt.com', '@khi.com', '@skt.com', '@jlj.com', '@twt.com', '@rwp.com', '@lhr.com', '@isb.com', '@gmwf.com', '@gmd.com', '@gmwf.org']) {
             final altEmail = '${input.trim().toLowerCase()}$domain';
             if (altEmail == email.toLowerCase()) continue;
             try {
@@ -341,17 +355,41 @@ class _LoginPageState extends State<LoginPage> {
                   .timeout(const Duration(seconds: 6));
               email = altEmail;
               authException = null;
+              debugPrint('[LoginPage] ✅ Successfully authenticated via alternate domain: $altEmail');
               break;
             } catch (_) {}
           }
         }
+        // Typed an email the profile records differently: try the profile's one too.
+        if (cred == null && e.code == 'invalid-credential' && input.contains('@') &&
+            profileEmail.contains('@') && profileEmail != email) {
+          try {
+            cred = await FirebaseAuth.instance
+                .signInWithEmailAndPassword(email: profileEmail, password: password)
+                .timeout(const Duration(seconds: 12));
+            email = profileEmail;
+            authException = null;
+          } catch (_) {}
+        }
+      } on TimeoutException {
+        // Android can spend longer than 12 s on app verification before the
+        // sign-in completes; the call keeps running, so wait for it rather than
+        // reporting a correct password as wrong.
+        debugPrint('[LoginPage] Firebase sign-in slow — waiting for it to finish');
+        authTimedOut = true;
+        _setLoginStep('login: Firebase sign-in (slow)', 'Still verifying — slow connection');
       } catch (authErr) {
         debugPrint('[LoginPage] Cloud sign-in error: $authErr');
       }
 
+      User? authUser = cred?.user;
+      if (authUser == null && authTimedOut) {
+        authUser = await _waitForFirebaseUser(email, const Duration(seconds: 25));
+      }
+
       // 3. If Firebase Auth succeeded:
-      if (cred != null && cred.user != null) {
-        final user = cred.user!;
+      if (authUser != null) {
+        final user = authUser;
         debugPrint('[LoginPage] Firebase sign-in OK — fetching fresh user data from Firestore');
 
         _setLoginStep('login: loading user profile', 'Loading your profile');
@@ -580,8 +618,14 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (mounted) {
-        _showError("Incorrect username/email or password. Please check your credentials.");
+        _showError(authTimedOut
+            ? "Sign-in timed out — the connection is too slow. Please try again."
+            : "Incorrect username/email or password. Please check your credentials.");
       }
+    })().timeout(
+      const Duration(seconds: 35),
+      onTimeout: () => throw TimeoutException("Overall login attempt timed out (35s)"),
+    );
     } on TimeoutException {
       debugPrint('[LoginPage] Timeout during login attempt');
       final okFs = await _tryFirestoreCredentialsLogin(input, password);
@@ -815,6 +859,9 @@ class _LoginPageState extends State<LoginPage> {
         ));
       }
 
+      LanFirestoreGate.updateRole(fsUser['role']?.toString());
+      unawaited(_completeFirebaseSignInInBackground(fsUser, password));
+
       if (mounted) {
         Flushbar(
           message: "Welcome back, ${fsUser['username'] ?? fsUser['name'] ?? input}!",
@@ -850,6 +897,22 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  /// Waits for a sign-in that outlived its timeout to finish (the Firebase call
+  /// keeps running). Returns the signed-in user when it matches [email].
+  Future<User?> _waitForFirebaseUser(String email, Duration maxWait) async {
+    bool matches(User? u) =>
+        u != null && (email.isEmpty || (u.email ?? '').toLowerCase() == email.toLowerCase());
+    if (matches(FirebaseAuth.instance.currentUser)) return FirebaseAuth.instance.currentUser;
+    try {
+      return await FirebaseAuth.instance
+          .authStateChanges()
+          .firstWhere(matches)
+          .timeout(maxWait);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // ── Firebase error handler ────────────────────────────────────────────────
   Future<void> _handleFirebaseAuthError(
       FirebaseAuthException e, String input, String password) async {
@@ -882,6 +945,11 @@ class _LoginPageState extends State<LoginPage> {
       // user enumeration. Only fall through to offline if cached creds exist.
       case 'wrong-password':
       case 'invalid-credential':
+        // 1. Try authoritative Firestore document check (e.g. if user is not in Firebase Auth yet)
+        final okFs = await _tryFirestoreCredentialsLogin(input, password);
+        if (okFs) return;
+
+        // 2. Try offline cache
         final hasCached = await OfflineAuthService.hasCachedCredentialsFor(
           input.toLowerCase(),
         );
@@ -890,6 +958,11 @@ class _LoginPageState extends State<LoginPage> {
           final ok = await _attemptOfflineLogin(input, password);
           if (ok) return;
         }
+
+        // 3. Try local_users database fallback
+        final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+        if (okLocal) return;
+
         if (mounted) {
           _showError("Incorrect username or password. Please check and try again.");
         }
@@ -915,7 +988,10 @@ class _LoginPageState extends State<LoginPage> {
         final okLocal = await _tryLocalUsersFallbackLogin(input, password);
         if (okLocal) return;
         if (mounted) {
-          _showError("Incorrect username/email or password. Please check your credentials.");
+          // Not a password problem: on Android this is usually app verification
+          // (Play Integrity / reCAPTCHA) failing. Show the real reason.
+          _showError("Sign-in service error (${e.code}): ${e.message ?? 'no details'}. "
+              "Check the phone's date/time and Google Play services, then try again.");
         }
         return;
 
@@ -926,7 +1002,7 @@ class _LoginPageState extends State<LoginPage> {
         final okLocal = await _tryLocalUsersFallbackLogin(input, password);
         if (okLocal) return;
         if (mounted) {
-          _showError("Login failed (${e.code}). Please check your credentials.");
+          _showError("Login failed (${e.code}): ${e.message ?? 'no details'}");
         }
     }
   }
@@ -1007,19 +1083,46 @@ class _LoginPageState extends State<LoginPage> {
   /// widget state.
   Future<void> _completeFirebaseSignInInBackground(Map<String, dynamic> userData, String password) async {
     final email = (userData['email'] ?? '').toString().trim().toLowerCase();
-    if (!email.contains('@')) return;
     final current = FirebaseAuth.instance.currentUser;
-    if (current != null && (current.email ?? '').toLowerCase() == email) return;
+    if (current != null && (current.email ?? '').toLowerCase() == email && email.isNotEmpty) return;
 
     // Let the home screen build its first frames before doing network work.
     await Future.delayed(const Duration(seconds: 2));
     try {
-      final cred = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(email: email, password: password)
-          .timeout(const Duration(seconds: 20));
-      final uid = cred.user?.uid;
-      debugPrint('[LoginPage] ✅ Background Firebase sign-in complete for $email');
-      if (uid != null) {
+      UserCredential? cred;
+      if (email.contains('@')) {
+        try {
+          cred = await FirebaseAuth.instance
+              .signInWithEmailAndPassword(email: email, password: password)
+              .timeout(const Duration(seconds: 15));
+        } on FirebaseAuthException catch (authErr) {
+          if (authErr.code == 'user-not-found' || authErr.code == 'invalid-credential') {
+            // User credentials were verified against authoritative Firestore doc, but not yet created in Auth.
+            // Automatically enroll them into Firebase Auth so cloud sync and security rules pass!
+            try {
+              cred = await FirebaseAuth.instance
+                  .createUserWithEmailAndPassword(email: email, password: password)
+                  .timeout(const Duration(seconds: 15));
+              debugPrint('[LoginPage] 🌟 Auto-enrolled verified user into Firebase Auth for $email');
+            } catch (createErr) {
+              debugPrint('[LoginPage] Auto-enroll in Auth note: $createErr');
+            }
+          }
+        }
+      }
+
+      // If email auth didn't establish a user session, establish fallback anonymous auth
+      // so Firestore security rules (request.auth != null) never block sync writes
+      if (FirebaseAuth.instance.currentUser == null) {
+        try {
+          await FirebaseAuth.instance.signInAnonymously().timeout(const Duration(seconds: 10));
+          debugPrint('[LoginPage] 🛡️ Fallback anonymous auth established for cloud Firestore sync');
+        } catch (_) {}
+      }
+
+      final uid = cred?.user?.uid ?? FirebaseAuth.instance.currentUser?.uid;
+      debugPrint('[LoginPage] ✅ Background Firebase session established for $email (uid: $uid)');
+      if (uid != null && email.isNotEmpty) {
         final nowTs = FieldValue.serverTimestamp();
         FirebaseFirestore.instance.collection('users').doc(uid).set({
           'lastLoginAt': nowTs,
@@ -1089,6 +1192,7 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       debugPrint('[LoginPage] Offline login successful → role=${userData['role']}');
+      unawaited(_completeFirebaseSignInInBackground(userData, password));
       if (mounted) {
         Flushbar(
           message: "Welcome back, ${userData['username']}! (Offline Mode)",
@@ -1188,6 +1292,7 @@ class _LoginPageState extends State<LoginPage> {
 
           if (isKeyMatch && isPwMatch) {
             u['role'] = _resolveRoleFromMap(u);
+            unawaited(_completeFirebaseSignInInBackground(u, password));
             if (mounted) {
               Flushbar(
                 message: "Welcome back, ${u['username'] ?? u['name'] ?? input}!",
@@ -2095,12 +2200,22 @@ class _LoginPageState extends State<LoginPage> {
       };
     }
 
-    // 1. If online, query Firestore FIRST across Root and all Branch subcollections in parallel
+    // 0.5. Fast check from local storage (0ms response)
+    final localMatch = LocalStorageService.findLocalUser(lower) ?? LocalStorageService.findLocalUser(trimmed);
+    if (localMatch != null && localMatch['email'] != null && (localMatch['email'] as String).contains('@')) {
+      final r = _resolveRoleFromMap(localMatch);
+      if (r.isNotEmpty && r != 'unknown' && r != 'unassigned') {
+        debugPrint('[LoginPage] Fast match from local storage for: $lower');
+        return Map<String, dynamic>.from(localMatch);
+      }
+    }
+
+    // 1. If online, query Firestore with fast-path staged resolution
     try {
       final isOnline = knownOnline || await _hasRealInternet();
       if (isOnline) {
-        final checkBranches = _getAllBranchIds();
-        final cloudQueries = <Future<List<Map<String, dynamic>>>>[
+        // Stage 1: Fast targeted query to Root /users collection (3-5 queries max, ~200ms)
+        final rootQueries = <Future<List<Map<String, dynamic>>>>[
           // Root /users by doc ID (lower and raw)
           FirebaseFirestore.instance
               .collection('users')
@@ -2149,7 +2264,7 @@ class _LoginPageState extends State<LoginPage> {
           FirebaseFirestore.instance
               .collection('users')
               .where('usernameLower', isEqualTo: lower)
-              .limit(3)
+              .limit(2)
               .get()
               .then((snap) {
             final list = <Map<String, dynamic>>[];
@@ -2169,33 +2284,34 @@ class _LoginPageState extends State<LoginPage> {
           }).catchError((_) => <Map<String, dynamic>>[]),
 
           // Root /users by username
-          FirebaseFirestore.instance
-              .collection('users')
-              .where('username', isEqualTo: trimmed)
-              .limit(3)
-              .get()
-              .then((snap) {
-            final list = <Map<String, dynamic>>[];
-            for (final doc in snap.docs) {
-              final d = doc.data();
-              final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-              if (d['isDeleted'] == true || st == 'deleted') continue;
-              list.add({
-                ...d,
-                'uid': doc.id,
-                'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
-                'username': d['username'] ?? doc['username'],
-                'role': _resolveRoleFromMap(d),
-              });
-            }
-            return list;
-          }).catchError((_) => <Map<String, dynamic>>[]),
+          if (lower != trimmed)
+            FirebaseFirestore.instance
+                .collection('users')
+                .where('username', isEqualTo: trimmed)
+                .limit(2)
+                .get()
+                .then((snap) {
+              final list = <Map<String, dynamic>>[];
+              for (final doc in snap.docs) {
+                final d = doc.data();
+                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+                if (d['isDeleted'] == true || st == 'deleted') continue;
+                list.add({
+                  ...d,
+                  'uid': doc.id,
+                  'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
+                  'username': d['username'] ?? doc['username'],
+                  'role': _resolveRoleFromMap(d),
+                });
+              }
+              return list;
+            }).catchError((_) => <Map<String, dynamic>>[]),
 
           // Root /users by email
           FirebaseFirestore.instance
               .collection('users')
               .where('email', isEqualTo: lower)
-              .limit(3)
+              .limit(2)
               .get()
               .then((snap) {
             final list = <Map<String, dynamic>>[];
@@ -2218,7 +2334,7 @@ class _LoginPageState extends State<LoginPage> {
           FirebaseFirestore.instance
               .collection('users')
               .where('uid', isEqualTo: trimmed)
-              .limit(3)
+              .limit(2)
               .get()
               .then((snap) {
             final list = <Map<String, dynamic>>[];
@@ -2236,10 +2352,97 @@ class _LoginPageState extends State<LoginPage> {
             }
             return list;
           }).catchError((_) => <Map<String, dynamic>>[]),
+        ];
 
-          // Branch subcollections /branches/{b}/users queries
+        final rootResults = await Future.wait(rootQueries.map(
+          (q) => q.timeout(const Duration(seconds: 6), onTimeout: () => <Map<String, dynamic>>[]),
+        ));
+        final List<Map<String, dynamic>> foundInRoot = [];
+        for (final list in rootResults) {
+          foundInRoot.addAll(list);
+        }
+
+        if (foundInRoot.isNotEmpty) {
+          final mergedUser = _mergeCloudUserDocs(foundInRoot, defaultUsername: trimmed);
+          unawaited(LocalStorageService.saveLocalUser(mergedUser));
+          unawaited(OfflineAuthService.updateCachedUserData(mergedUser));
+          debugPrint('[LoginPage] ✅ Fast user resolved from root /users for: $input -> email: ${mergedUser['email']}, role: ${mergedUser['role']}, branch: ${mergedUser['branchId']}');
+          return mergedUser;
+        }
+
+        // Stage 2: Query collectionGroup('users') (searches all branch subcollections in 1 query)
+        final groupQueries = <Future<List<Map<String, dynamic>>>>[
+          FirebaseFirestore.instance
+              .collectionGroup('users')
+              .where('usernameLower', isEqualTo: lower)
+              .limit(3)
+              .get()
+              .then((snap) {
+            final list = <Map<String, dynamic>>[];
+            for (final doc in snap.docs) {
+              final d = doc.data();
+              final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+              if (d['isDeleted'] == true || st == 'deleted') continue;
+              final pathParts = doc.reference.path.split('/');
+              final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
+              list.add({
+                ...d,
+                'uid': doc.id,
+                'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
+                'username': d['username'] ?? doc['username'],
+                'branchId': branchId,
+                'role': _resolveRoleFromMap(d),
+              });
+            }
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
+
+          FirebaseFirestore.instance
+              .collectionGroup('users')
+              .where('email', isEqualTo: lower)
+              .limit(3)
+              .get()
+              .then((snap) {
+            final list = <Map<String, dynamic>>[];
+            for (final doc in snap.docs) {
+              final d = doc.data();
+              final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+              if (d['isDeleted'] == true || st == 'deleted') continue;
+              final pathParts = doc.reference.path.split('/');
+              final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
+              list.add({
+                ...d,
+                'uid': doc.id,
+                'email': d['email'] ?? lower,
+                'username': d['username'] ?? doc['username'],
+                'branchId': branchId,
+                'role': _resolveRoleFromMap(d),
+              });
+            }
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
+        ];
+
+        final groupResults = await Future.wait(groupQueries.map(
+          (q) => q.timeout(const Duration(seconds: 6), onTimeout: () => <Map<String, dynamic>>[]),
+        ));
+        final List<Map<String, dynamic>> foundInGroup = [];
+        for (final list in groupResults) {
+          foundInGroup.addAll(list);
+        }
+
+        if (foundInGroup.isNotEmpty) {
+          final mergedUser = _mergeCloudUserDocs(foundInGroup, defaultUsername: trimmed);
+          unawaited(LocalStorageService.saveLocalUser(mergedUser));
+          unawaited(OfflineAuthService.updateCachedUserData(mergedUser));
+          debugPrint('[LoginPage] ✅ User resolved via collectionGroup for: $input -> email: ${mergedUser['email']}, role: ${mergedUser['role']}, branch: ${mergedUser['branchId']}');
+          return mergedUser;
+        }
+
+        // Stage 3: Direct branch queries as fallback
+        final checkBranches = _getAllBranchIds();
+        final branchQueries = <Future<List<Map<String, dynamic>>>>[
           for (final b in checkBranches) ...[
-            // By doc ID (lower)
             FirebaseFirestore.instance
                 .collection('branches')
                 .doc(b)
@@ -2264,13 +2467,12 @@ class _LoginPageState extends State<LoginPage> {
               return <Map<String, dynamic>>[];
             }).catchError((_) => <Map<String, dynamic>>[]),
 
-            // By usernameLower
             FirebaseFirestore.instance
                 .collection('branches')
                 .doc(b)
                 .collection('users')
                 .where('usernameLower', isEqualTo: lower)
-                .limit(3)
+                .limit(2)
                 .get()
                 .then((snap) {
               final list = <Map<String, dynamic>>[];
@@ -2282,84 +2484,6 @@ class _LoginPageState extends State<LoginPage> {
                   ...d,
                   'uid': doc.id,
                   'email': d['email'] ?? '$lower@$b.com',
-                  'username': d['username'] ?? doc['username'],
-                  'branchId': b,
-                  'role': _resolveRoleFromMap(d),
-                });
-              }
-              return list;
-            }).catchError((_) => <Map<String, dynamic>>[]),
-
-            // By username
-            FirebaseFirestore.instance
-                .collection('branches')
-                .doc(b)
-                .collection('users')
-                .where('username', isEqualTo: trimmed)
-                .limit(3)
-                .get()
-                .then((snap) {
-              final list = <Map<String, dynamic>>[];
-              for (final doc in snap.docs) {
-                final d = doc.data();
-                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-                if (d['isDeleted'] == true || st == 'deleted') continue;
-                list.add({
-                  ...d,
-                  'uid': doc.id,
-                  'email': d['email'] ?? '$lower@$b.com',
-                  'username': d['username'] ?? doc['username'],
-                  'branchId': b,
-                  'role': _resolveRoleFromMap(d),
-                });
-              }
-              return list;
-            }).catchError((_) => <Map<String, dynamic>>[]),
-
-            // By email
-            FirebaseFirestore.instance
-                .collection('branches')
-                .doc(b)
-                .collection('users')
-                .where('email', isEqualTo: lower)
-                .limit(3)
-                .get()
-                .then((snap) {
-              final list = <Map<String, dynamic>>[];
-              for (final doc in snap.docs) {
-                final d = doc.data();
-                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-                if (d['isDeleted'] == true || st == 'deleted') continue;
-                list.add({
-                  ...d,
-                  'uid': doc.id,
-                  'email': d['email'] ?? lower,
-                  'username': d['username'] ?? doc['username'],
-                  'branchId': b,
-                  'role': _resolveRoleFromMap(d),
-                });
-              }
-              return list;
-            }).catchError((_) => <Map<String, dynamic>>[]),
-
-            // By uid
-            FirebaseFirestore.instance
-                .collection('branches')
-                .doc(b)
-                .collection('users')
-                .where('uid', isEqualTo: trimmed)
-                .limit(3)
-                .get()
-                .then((snap) {
-              final list = <Map<String, dynamic>>[];
-              for (final doc in snap.docs) {
-                final d = doc.data();
-                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-                if (d['isDeleted'] == true || st == 'deleted') continue;
-                list.add({
-                  ...d,
-                  'uid': doc.id,
-                  'email': d['email'],
                   'username': d['username'] ?? doc['username'],
                   'branchId': b,
                   'role': _resolveRoleFromMap(d),
@@ -2368,72 +2492,21 @@ class _LoginPageState extends State<LoginPage> {
               return list;
             }).catchError((_) => <Map<String, dynamic>>[]),
           ],
-
-          // collectionGroup('users') queries
-          FirebaseFirestore.instance
-              .collectionGroup('users')
-              .where('usernameLower', isEqualTo: lower)
-              .limit(5)
-              .get()
-              .then((snap) {
-            final list = <Map<String, dynamic>>[];
-            for (final doc in snap.docs) {
-              final d = doc.data();
-              final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-              if (d['isDeleted'] == true || st == 'deleted') continue;
-              final pathParts = doc.reference.path.split('/');
-              final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
-              list.add({
-                ...d,
-                'uid': doc.id,
-                'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
-                'username': d['username'] ?? doc['username'],
-                'branchId': branchId,
-                'role': _resolveRoleFromMap(d),
-              });
-            }
-            return list;
-          }).catchError((_) => <Map<String, dynamic>>[]),
-
-          FirebaseFirestore.instance
-              .collectionGroup('users')
-              .where('email', isEqualTo: lower)
-              .limit(5)
-              .get()
-              .then((snap) {
-            final list = <Map<String, dynamic>>[];
-            for (final doc in snap.docs) {
-              final d = doc.data();
-              final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-              if (d['isDeleted'] == true || st == 'deleted') continue;
-              final pathParts = doc.reference.path.split('/');
-              final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
-              list.add({
-                ...d,
-                'uid': doc.id,
-                'email': d['email'] ?? lower,
-                'username': d['username'] ?? doc['username'],
-                'branchId': branchId,
-                'role': _resolveRoleFromMap(d),
-              });
-            }
-            return list;
-          }).catchError((_) => <Map<String, dynamic>>[]),
         ];
 
-        final nestedResults = await Future.wait(cloudQueries.map(
-          (q) => q.timeout(const Duration(seconds: 4), onTimeout: () => <Map<String, dynamic>>[]),
+        final branchResults = await Future.wait(branchQueries.map(
+          (q) => q.timeout(const Duration(seconds: 8), onTimeout: () => <Map<String, dynamic>>[]),
         ));
-        final List<Map<String, dynamic>> allFoundDocs = [];
-        for (final list in nestedResults) {
-          allFoundDocs.addAll(list);
+        final List<Map<String, dynamic>> foundInBranches = [];
+        for (final list in branchResults) {
+          foundInBranches.addAll(list);
         }
 
-        if (allFoundDocs.isNotEmpty) {
-          final mergedUser = _mergeCloudUserDocs(allFoundDocs, defaultUsername: trimmed);
+        if (foundInBranches.isNotEmpty) {
+          final mergedUser = _mergeCloudUserDocs(foundInBranches, defaultUsername: trimmed);
           unawaited(LocalStorageService.saveLocalUser(mergedUser));
           unawaited(OfflineAuthService.updateCachedUserData(mergedUser));
-          debugPrint('[LoginPage] ✅ Authoritative user resolved from cloud across both places for: $input -> email: ${mergedUser['email']}, role: ${mergedUser['role']}, branch: ${mergedUser['branchId']}');
+          debugPrint('[LoginPage] ✅ Authoritative user resolved from branch subcollections for: $input -> email: ${mergedUser['email']}, role: ${mergedUser['role']}, branch: ${mergedUser['branchId']}');
           return mergedUser;
         }
       }
@@ -3154,7 +3227,31 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
 
-
+          if (_loading) ...[
+            const SizedBox(height: 8),
+            Center(
+              child: TextButton(
+                onPressed: () {
+                  if (mounted) {
+                    setState(() {
+                      _loading = false;
+                      _loginStep = 'Cancelled';
+                    });
+                    _showError("Login attempt cancelled. Please try again or sign in offline.");
+                  }
+                },
+                child: const Text(
+                  "Cancel",
+                  style: TextStyle(
+                    color: SoftPalette.slate400,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    decoration: TextDecoration.underline,
+                  ),
+                ),
+              ),
+            ),
+          ],
 
           const SizedBox(height: 16),
 

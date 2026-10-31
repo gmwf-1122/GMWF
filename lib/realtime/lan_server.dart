@@ -86,6 +86,57 @@ class LanServer {
     'ack_serials', 'ack_stock_items', 'message_ack', 'request_catch_up', 'request_full_lan_sync',
   };
 
+  // ── Token number issuer ───────────────────────────────────────────────────
+  // Each desk used to number tokens from its own records (highest it had seen + 1). Two desks
+  // issuing before they had received each other's token gave two patients the same number,
+  // and their records then merged: the dispenser saw one patient's medicines for the other.
+  // Desks now ask here first, so numbers are handed out one at a time for the whole LAN.
+
+  /// Highest sequence issued per serial prefix ('301026M-HAJI').
+  final Map<String, int> _lastIssuedSeq = {};
+
+  static final RegExp _serialParts = RegExp(r'^(\d{6}[A-Z]?-[A-Z0-9_]+)-(\d{1,4})$');
+
+  void _noteIssuedSerial(String? serial) {
+    final m = _serialParts.firstMatch((serial ?? '').trim().toUpperCase());
+    if (m == null) return;
+    final prefix = m.group(1)!;
+    final seq = int.parse(m.group(2)!);
+    if (seq > (_lastIssuedSeq[prefix] ?? 0)) _lastIssuedSeq[prefix] = seq;
+  }
+
+  /// First request for a prefix since this server started: also count the tokens already
+  /// stored on this PC, so a restart never hands out a number again.
+  void _seedIssuedSeq(String prefix) {
+    if (_lastIssuedSeq.containsKey(prefix)) return;
+    _lastIssuedSeq[prefix] = 0;
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) return;
+      for (final v in Hive.box(LocalStorageService.entriesBox).values) {
+        if (v is Map) _noteIssuedSerial(v['serial']?.toString());
+      }
+    } catch (_) {}
+  }
+
+  void _reserveSerial(WebSocket socket, Map<String, dynamic> data) {
+    final prefix = (data['prefix'] ?? '').toString().trim().toUpperCase();
+    final requestId = data['requestId']?.toString();
+    if (prefix.isEmpty || requestId == null || requestId.isEmpty) return;
+    _seedIssuedSeq(prefix);
+    final proposed = (data['proposed'] as num?)?.toInt() ?? 0;
+    final last = _lastIssuedSeq[prefix] ?? 0;
+    final seq = proposed > last ? proposed : last + 1;
+    _lastIssuedSeq[prefix] = seq;
+    try {
+      socket.add(jsonEncode({
+        'event_type': 'serial_reserved',
+        'requestId':  requestId,
+        'prefix':     prefix,
+        'seq':        seq,
+      }));
+    } catch (_) {}
+  }
+
   // ── [LIVENESS] Track last active timestamp for each socket to evict silent/dead sockets ──
   final Map<WebSocket, DateTime> _lastActiveTimes = {};
   Timer? _heartbeatTimer;
@@ -557,6 +608,16 @@ class LanServer {
           print('❌ Message from UNIDENTIFIED client $socketId dropped — staging buffer full');
         }
         return;
+      }
+
+      // ── Token numbers: one issuer for every desk ──────────────────────────
+      if (eventType == 'reserve_serial') {
+        _reserveSerial(socket, data);
+        return;
+      }
+      if (eventType == 'save_entry' || eventType == 'token_created') {
+        final inner = data['data'] is Map ? data['data'] as Map : data;
+        _noteIssuedSerial((inner['serial'] ?? data['serial'])?.toString());
       }
 
       // ── [DEDUP] Server-side deduplication ─────────────────────────────────

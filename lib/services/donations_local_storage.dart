@@ -17,7 +17,6 @@
 //
 //   4. All other logic is identical to the previous revision.
 
-import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -274,6 +273,62 @@ class DonationsLocalStorage {
   // ── Key helpers ────────────────────────────────────────────────────────────
   static String _donationKey(String branchId, String date, String localId) =>
       '${branchId}__${date}__$localId';
+
+  static bool _isTombstone(Map m) =>
+      m['syncStatus'] == 'deleted' || m['isDeleted'] == true || m['status'] == 'deleted';
+
+  /// firestoreIds and localIds of donations deleted on this PC.
+  static Set<String> _localTombstoneIds(Box box) {
+    final ids = <String>{};
+    for (final v in box.values) {
+      if (v is Map && _isTombstone(v)) {
+        final fsId = v['firestoreId']?.toString();
+        if (fsId != null && fsId.isNotEmpty) ids.add(fsId);
+        final lId = v['localId']?.toString();
+        if (lId != null && lId.isNotEmpty) ids.add(lId);
+      }
+    }
+    return ids;
+  }
+
+  /// Local keys grouped by localId (the last '__' segment of the key).
+  static Map<String, List<dynamic>> _keysByLocalId(Box box) {
+    final map = <String, List<dynamic>>{};
+    for (final k in box.keys) {
+      final s = k.toString();
+      if (!s.contains('__')) continue;
+      map.putIfAbsent(s.split('__').last, () => []).add(k);
+    }
+    return map;
+  }
+
+  /// Editing a donation's date re-keys it (branch__date__localId). Other PCs got
+  /// the edit under the new key and kept the old one, so it showed twice. Returns
+  /// the old-date copies to drop; a copy with unsynced local edits is kept.
+  static List<dynamic> _staleRedatedKeys(
+      Box box, Map<String, List<dynamic>> keysByLocalId, String localId, String key) {
+    final stale = <dynamic>[];
+    for (final k in keysByLocalId[localId] ?? const []) {
+      if (k.toString() == key) continue;
+      final v = box.get(k);
+      if (v is Map && !_isTombstone(v) && v['syncStatus'] != 'pending') stale.add(k);
+    }
+    return stale;
+  }
+
+  static Map<String, dynamic> _remoteTombstone(
+      dynamic existing, Map<String, dynamic> d, String docId, String localId, String key) {
+    return _sanitize({
+      if (existing is Map) ...Map<String, dynamic>.from(existing),
+      ...d,
+      'firestoreId': docId,
+      'localId': localId,
+      'hiveKey': key,
+      'syncStatus': 'deleted',
+      'isDeleted': true,
+      'status': 'deleted',
+    });
+  }
 
   static String _donorKey(String donorId) => 'donor_$donorId';
 
@@ -1138,21 +1193,9 @@ class DonationsLocalStorage {
       final box = Hive.box(donationsBox);
       final Map<String, dynamic> updates = {};
 
-      final tombstoneIds = <String>{};
-      final tombstoneReceipts = <String>{};
-      for (final v in box.values) {
-        if (v is Map && (v['syncStatus'] == 'deleted' || v['isDeleted'] == true || v['status'] == 'deleted')) {
-          final fsId = v['firestoreId']?.toString();
-          if (fsId != null && fsId.isNotEmpty) tombstoneIds.add(fsId);
-          final lId = v['localId']?.toString();
-          if (lId != null && lId.isNotEmpty) tombstoneIds.add(lId);
-          final cleanRcpt = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
-          // Receipt numbers repeat across branches: match within the same branch only, or deleting
-          // a receipt locally purged another branch's donation from the cloud.
-          final tBranch = LocalStorageService.sanitizeBranchId((v['branchId'] ?? '').toString());
-          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add('$tBranch|$cleanRcpt');
-        }
-      }
+      final tombstoneIds = _localTombstoneIds(box);
+      final keysByLocalId = _keysByLocalId(box);
+      final staleKeys = <dynamic>{};
 
       for (final doc in docs) {
         if (doc.id == 'credit_ledger') continue;
@@ -1166,15 +1209,14 @@ class DonationsLocalStorage {
         final date = (d['date'] as String?) ?? _today();
         final localId = (d['localId'] as String?) ?? doc.id;
         final key = _donationKey(docBranch, date, localId);
-        final cleanRcpt = cleanReceiptNumber(d['receiptNo']?.toString() ?? '');
 
-        // If this document was deleted locally, purge it from Firestore and do NOT revive
-        if (tombstoneIds.contains(doc.id) ||
-            tombstoneIds.contains(localId) ||
-            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains('$docBranch|$cleanRcpt'))) {
-          doc.reference.delete().catchError((_) {});
+        // Deleted on this PC: its queued soft-delete updates the cloud doc. Never
+        // hard-delete it here — peers need the tombstone to drop their copies.
+        // (Matched by id only; receipt numbers repeat.)
+        if (tombstoneIds.contains(doc.id) || tombstoneIds.contains(localId)) {
           continue;
         }
+        staleKeys.addAll(_staleRedatedKeys(box, keysByLocalId, localId, key));
 
         // Normalised to UTC before it becomes the watermark: older docs carry local-time strings
         // (no 'Z') that sort ~5 h ahead and made the next query skip newer UTC-stamped donations.
@@ -1188,13 +1230,12 @@ class DonationsLocalStorage {
         }
 
         final existing = box.get(key);
-        if (existing != null) {
-          final ex = Map<String, dynamic>.from(existing as Map);
-          if (ex['syncStatus'] == 'deleted' || ex['isDeleted'] == true || ex['status'] == 'deleted') {
-            doc.reference.delete().catchError((_) {});
-            continue;
-          }
+        // Soft-deleted elsewhere: keep a local tombstone so every reader drops it.
+        if (_isTombstone(d)) {
+          updates[key] = _remoteTombstone(existing, d, doc.id, localId, key);
+          continue;
         }
+        if (existing is Map && _isTombstone(existing)) continue;
 
         if (existing == null) {
           updates[key] = _sanitize({
@@ -1234,6 +1275,10 @@ class DonationsLocalStorage {
 
       if (updates.isNotEmpty) {
         await box.putAll(updates);
+      }
+      staleKeys.removeAll(updates.keys);
+      if (staleKeys.isNotEmpty) {
+        await box.deleteAll(staleKeys);
       }
 
       if (maxServerTs != null) {
@@ -1303,19 +1348,9 @@ class DonationsLocalStorage {
       final box = Hive.box(donationsBox);
       final Map<String, dynamic> updates = {};
 
-      final tombstoneIds = <String>{};
-      final tombstoneReceipts = <String>{};
-      for (final v in box.values) {
-        if (v is Map && (v['syncStatus'] == 'deleted' || v['isDeleted'] == true || v['status'] == 'deleted')) {
-          final fsId = v['firestoreId']?.toString();
-          if (fsId != null && fsId.isNotEmpty) tombstoneIds.add(fsId);
-          final lId = v['localId']?.toString();
-          if (lId != null && lId.isNotEmpty) tombstoneIds.add(lId);
-          final cleanRcpt = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
-          final tBranch = LocalStorageService.sanitizeBranchId((v['branchId'] ?? '').toString());
-          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add('$tBranch|$cleanRcpt'); // same branch only
-        }
-      }
+      final tombstoneIds = _localTombstoneIds(box);
+      final keysByLocalId = _keysByLocalId(box);
+      final staleKeys = <dynamic>{};
 
       for (final doc in docs) {
         if (doc.id == 'credit_ledger') continue;
@@ -1328,23 +1363,16 @@ class DonationsLocalStorage {
         final date = (d['date'] as String?) ?? _today();
         final localId = (d['localId'] as String?) ?? doc.id;
         final key = _donationKey(docBranch, date, localId);
-        final cleanRcpt = cleanReceiptNumber(d['receiptNo']?.toString() ?? '');
 
-        if (tombstoneIds.contains(doc.id) ||
-            tombstoneIds.contains(localId) ||
-            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains('$docBranch|$cleanRcpt'))) {
-          doc.reference.delete().catchError((_) {});
-          continue;
-        }
+        if (tombstoneIds.contains(doc.id) || tombstoneIds.contains(localId)) continue;
+        staleKeys.addAll(_staleRedatedKeys(box, keysByLocalId, localId, key));
 
         final existing = box.get(key);
-        if (existing != null) {
-          final ex = Map<String, dynamic>.from(existing as Map);
-          if (ex['syncStatus'] == 'deleted' || ex['isDeleted'] == true || ex['status'] == 'deleted') {
-            doc.reference.delete().catchError((_) {});
-            continue;
-          }
+        if (_isTombstone(d)) {
+          updates[key] = _remoteTombstone(existing, d, doc.id, localId, key);
+          continue;
         }
+        if (existing is Map && _isTombstone(existing)) continue;
 
         if (existing == null) {
           updates[key] = _sanitize({
@@ -1367,6 +1395,10 @@ class DonationsLocalStorage {
 
       if (updates.isNotEmpty) {
         await box.putAll(updates);
+      }
+      staleKeys.removeAll(updates.keys);
+      if (staleKeys.isNotEmpty) {
+        await box.deleteAll(staleKeys);
       }
       await _syncReceiptSequence();
       await box.flush();
@@ -1507,22 +1539,35 @@ class DonationsLocalStorage {
     }
   }
 
-  static Future<void> updateDonationStatus({
+  /// Returns false when the donation is not in local storage (nothing changed).
+  static Future<bool> updateDonationStatus({
     required String branchId,
     required String localId,
     required String date,
     required String newStatus,
     String? firestoreId,
+    String? hiveKey,
   }) async {
-    final key      = _donationKey(branchId, date, localId);
-    final box      = Hive.box(donationsBox);
-    final existing = box.get(key);
+    final box = Hive.box(donationsBox);
+    // The record's own key first: rebuilding it from a raw cloud branchId
+    // ('Gujrat', an alias) missed the sanitized key and silently did nothing.
+    dynamic key = hiveKey;
+    if (key == null || !box.containsKey(key)) {
+      key = _donationKey(LocalStorageService.sanitizeBranchId(branchId), date, localId);
+    }
+    if (!box.containsKey(key) && localId.isNotEmpty) {
+      key = box.keys.firstWhere((k) => k.toString().endsWith('__$localId'), orElse: () => null);
+    }
+    final existing = key == null ? null : box.get(key);
 
     if (existing != null) {
       final now  = DateTime.now().toUtc().toIso8601String();
       final data = Map<String, dynamic>.from(existing as Map);
       data['status']        = newStatus;
-      data['lastUpdatedAt'] = now; // ← timestamp so last-writer-wins resolves correctly
+      // The download compares updatedAt first; bumping only lastUpdatedAt let a
+      // download that ran before the upload flip the status back to pending.
+      data['updatedAt']     = now;
+      data['lastUpdatedAt'] = now;
       await box.put(key, data);
       await box.flush();
 
@@ -1538,15 +1583,19 @@ class DonationsLocalStorage {
         reason: 'Status changed to $newStatus',
       );
 
-      final fsId = firestoreId ?? data['firestoreId']?.toString();
+      // A null id made the queued action throw on every retry.
+      final fsId = firestoreId ?? data['firestoreId']?.toString() ?? data['localId']?.toString() ?? localId;
       await LocalStorageService.enqueueSync({
         'type':        'update_donation',
-        'branchId':    branchId,
+        'branchId':    LocalStorageService.sanitizeBranchId((data['branchId'] ?? branchId).toString()),
         'firestoreId': fsId,
-        // Include lastUpdatedAt so Firestore respects timestamp ordering
-        'fields':      {'status': newStatus, 'lastUpdatedAt': now},
+        'hiveKey':     key.toString(),
+        // Include the timestamps so Firestore respects timestamp ordering
+        'fields':      {'status': newStatus, 'updatedAt': now, 'lastUpdatedAt': now},
       });
+      return true;
     }
+    return false;
   }
 
   static Future<void> deleteDonation(String hiveKey, String branchId, {
@@ -1594,61 +1643,46 @@ class DonationsLocalStorage {
       reason: reason,
     );
 
-    // 3. Resolve all target branch candidates
-    final targetBranches = <String>{};
-    final docBranch = data['branchId']?.toString().toLowerCase().trim();
-    if (docBranch != null && docBranch.isNotEmpty && docBranch != 'all') {
-      targetBranches.add(docBranch);
-    }
-    final collectedBranch = data['collectedAtBranch']?.toString().toLowerCase().trim();
-    if (collectedBranch != null && collectedBranch.isNotEmpty && collectedBranch != 'all') {
-      targetBranches.add(collectedBranch);
-    }
-    final cleanB = branchId.toLowerCase().trim();
-    if (cleanB.isNotEmpty && cleanB != 'all') {
-      targetBranches.add(cleanB);
-    }
-    if (targetBranches.isEmpty) {
-      targetBranches.addAll(['gujrat', 'karachi', 'dasterkhwaan', 'headquarters']);
-    }
+    // 3. Soft-delete the cloud doc (branch copy + top-level copy, via the
+    //    update_donation handler) instead of hard-deleting every guessed id.
+    //    A hard delete never shows up in other PCs' delta download
+    //    (updatedAt > watermark), so they kept counting the donation; and the
+    //    old fan-out (5 ids x 3 branches, direct + queued) cost ~45 writes.
+    //    Readers on every version already skip status/isDeleted == deleted.
+    final docBranch = LocalStorageService.sanitizeBranchId(
+        (data['branchId'] ?? data['collectedAtBranch'] ?? branchId).toString());
+    final docId = (data['firestoreId']?.toString().isNotEmpty == true)
+        ? data['firestoreId'].toString()
+        : resolvedDocId;
+    await LocalStorageService.enqueueSync({
+      'type': 'update_donation',
+      'branchId': docBranch,
+      'firestoreId': docId,
+      'hiveKey': hiveKey,
+      'fields': {
+        'status': 'deleted',
+        'isDeleted': true,
+        'deleteReason': reason,
+        'deletedAt': now,
+        'deletedBy': username.trim().isNotEmpty ? username : userId,
+        'updatedAt': now,
+        'lastUpdatedAt': now,
+      },
+    });
 
-    // 4. Resolve all possible ID candidates
-    final candidates = <String>{};
-    if (fsId != null && fsId.isNotEmpty) candidates.add(fsId);
-    if (data['localId']?.toString().isNotEmpty == true) candidates.add(data['localId'].toString());
-    final cleanRcpt = data['receiptNoClean']?.toString() ?? cleanReceiptNumber(data['receiptNo']?.toString() ?? '');
-    if (cleanRcpt.isNotEmpty) {
-      candidates.add(cleanRcpt);
-      if (data['localId'] != null) candidates.add('${cleanRcpt}_${data['localId']}');
-    }
-    final lastSegment = hiveKey.split('__').last;
-    candidates.add(lastSegment);
-
-    // 5. Direct asynchronous deletion in Firestore across target branches
-    for (final b in targetBranches) {
-      for (final id in candidates) {
-        CloudDb.instance
-            .collection('branches')
-            .doc(b)
-            .collection('donations')
-            .doc(id)
-            .delete()
-            .catchError((_) {});
+    // 4. Tell LAN peers now; their donation handler stores the tombstone as-is.
+    try {
+      if (RealtimeManager().isConnected) {
+        RealtimeManager().sendMessage(RealtimeEvents.payload(
+          type: RealtimeEvents.saveDonationReceipt,
+          data: _sanitize({...updated, 'hiveKey': hiveKey}),
+        ));
       }
+    } catch (e) {
+      debugPrint('[DonationsLS] LAN tombstone broadcast error: $e');
     }
 
-    // 6. Queue for reliable background retry in SyncService
-    for (final b in targetBranches) {
-      for (final id in candidates) {
-        await LocalStorageService.enqueueSync({
-          'type': 'delete_donation',
-          'branchId': b,
-          'firestoreId': id,
-        });
-      }
-    }
-
-    // 7. Trigger cloud upload immediately
+    // 5. Trigger cloud upload immediately
     try {
       SyncService().triggerUpload(urgent: true);
     } catch (_) {}

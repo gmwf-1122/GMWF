@@ -81,6 +81,9 @@ class _PatientListState extends State<PatientList> {
     }
     CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
     ConnectionManager().addReconnectListener(_onLanReconnected);
+    // Another desk opened a patient (skip them) or won the same token (move on).
+    DispenseQueue.listenForClaims();
+    DispenseQueue.claimsChanged.addListener(_debouncedRebuild);
 
     if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
       _refreshQueueCache();
@@ -141,18 +144,22 @@ class _PatientListState extends State<PatientList> {
                 }
               }
 
+              if (existing is Map && LocalStorageService.isOlderPrescription(data, existing['prescription'])) {
+                _debouncedRebuild();
+                return;
+              }
               final updated = (existing is Map)
                   ? Map<String, dynamic>.from(existing)
                   : <String, dynamic>{
                       'branchId': normBranch,
-                      'serial': serial,
-                      'tokenNumber': serial,
+                      'serial': upperSerial,
+                      'tokenNumber': upperSerial,
                       'dateKey': data['dateKey'] ?? DateTime.now().toIso8601String().substring(0, 10),
                       'createdAt': data['createdAt'] ?? DateTime.now().toIso8601String(),
                     };
 
               updated['status'] = 'completed';
-              updated['prescription'] = data;
+              updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
               updated['prescriptionId'] = data['id'] ?? serial;
               updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
               if (data['doctorName'] != null) updated['doctorName'] = data['doctorName'];
@@ -298,6 +305,7 @@ class _PatientListState extends State<PatientList> {
     _entriesBoxSub?.cancel();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     ConnectionManager().removeReconnectListener(_onLanReconnected);
+    DispenseQueue.claimsChanged.removeListener(_debouncedRebuild);
     super.dispose();
   }
 
@@ -447,7 +455,7 @@ class _PatientListState extends State<PatientList> {
 
   List<Map<String, dynamic>> _getSortedQueue({String? filterOverride}) {
     final src = LocalStorageService.getLocalEntries(widget.branchId);
-    final key = '${filterOverride ?? ''}|$_selectedSessionFilter|$_selectedCampFilter|$_todayKey|${widget.branchId}';
+    final key = '${filterOverride ?? ''}|$_selectedSessionFilter|$_selectedCampFilter|$_sortNewestFirst|$_todayKey|${widget.branchId}';
     final now = DateTime.now();
     if (_queueMemo != null &&
         identical(src, _queueMemoSrc) &&
@@ -478,12 +486,7 @@ class _PatientListState extends State<PatientList> {
     if (!_isQueueInitialized) {
       _refreshQueueCache();
     }
-    final activePending = _cachedAllPatients
-        .where((p) {
-          final ds = (p['dispenseStatus'] ?? '').toString().toLowerCase();
-          return ds != 'dispensed' && ds != 'on_hold' && ds != 'hold';
-        })
-        .toList();
+    final activePending = DispenseQueue.pendingInTokenOrder(_cachedAllPatients);
 
     if (activePending.isEmpty) {
       if (widget.selectedPatient != null &&
@@ -495,7 +498,7 @@ class _PatientListState extends State<PatientList> {
 
     final currentSerial = widget.selectedPatient?['serial']?.toString() ?? '';
     final currentIsStillActive = activePending
-        .any((p) => (p['serial']?.toString() ?? '') == currentSerial);
+        .any((p) => DispenseQueue.sameSerial(p['serial'], currentSerial));
 
     if (currentSerial.isEmpty || !currentIsStillActive) {
       final smallest = activePending.first;
@@ -672,7 +675,10 @@ class _PatientListState extends State<PatientList> {
                                   color: _isDark ? SoftPalette.sky350 : _teal,
                                   size: 20,
                                 ),
-                                onPressed: () => setState(() => _sortNewestFirst = !_sortNewestFirst),
+                                onPressed: () => setState(() {
+                                  _sortNewestFirst = !_sortNewestFirst;
+                                  _refreshQueueCache();
+                                }),
                                 tooltip: _sortNewestFirst ? 'Sort: Oldest First' : 'Sort: Newest First',
                               ),
                               IconButton(
@@ -823,7 +829,7 @@ class _PatientListState extends State<PatientList> {
         (e['dispenseStatus'] ?? '').toString().toLowerCase() == 'hold';
     final isPending = !isDispensed && !isOnHold;
 
-    final isSelected = serial == widget.selectedPatient?['serial']?.toString();
+    final isSelected = DispenseQueue.sameSerial(serial, widget.selectedPatient?['serial']);
 
     // Category badge color & text
     Color badgeColor;
@@ -899,16 +905,11 @@ class _PatientListState extends State<PatientList> {
       child: InkWell(
         onTap: () {
           // STRICT ENFORCEMENT: Only the smallest pending token can be selected.
-          final activePending = _cachedAllPatients
-              .where((p) {
-                final ds = (p['dispenseStatus'] ?? '').toString().toLowerCase();
-                return ds != 'dispensed' && ds != 'on_hold' && ds != 'hold';
-              })
-              .toList();
+          final activePending = DispenseQueue.pendingInTokenOrder(_cachedAllPatients);
           final smallestSerial = activePending.isNotEmpty
-              ? (activePending.first['serial'] ?? activePending.first['id'] ?? '').toString().trim().toUpperCase()
+              ? (activePending.first['serial'] ?? activePending.first['id'] ?? '').toString()
               : null;
-          if (smallestSerial != null && serial.trim().toUpperCase() != smallestSerial) {
+          if (smallestSerial != null && !DispenseQueue.sameSerial(serial, smallestSerial)) {
             return;
           }
           widget.onPatientSelected(e);
@@ -1234,7 +1235,10 @@ class _PatientListState extends State<PatientList> {
   Widget _buildSessionChip(String value, String label, bool isDark) {
     final isSelected = _selectedSessionFilter == value;
     return InkWell(
-      onTap: () => setState(() => _selectedSessionFilter = value),
+      onTap: () => setState(() {
+        _selectedSessionFilter = value;
+        _refreshQueueCache();
+      }),
       borderRadius: BorderRadius.circular(10),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),

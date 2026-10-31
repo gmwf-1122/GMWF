@@ -173,6 +173,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   // Calendar filter state
   late DateTime _calendarMonth;
   bool _isCalendarExpanded = false;
+  bool _isSyncing = false;
 
   @override
   void initState() {
@@ -217,6 +218,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   }
 
   Future<void> _syncPunches([DateTime? targetDate, bool force = false]) async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
     try {
       final d = targetDate ?? widget.date;
       final dateStr = DateFormat('yyyy-MM-dd').format(d);
@@ -225,12 +228,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         await FinanceLocalStorage.deduplicateEmployeeRecords();
         await FinanceLocalStorage.downloadAttendance(widget.branchId, specificDateStr: dateStr, force: true);
       } else {
-        // Load from local Hive first for instant responsiveness, and fetch cloud attendance for target date
-        final hasEmps = FinanceLocalStorage.getEmployees(widget.branchId).isNotEmpty;
-        if (!hasEmps) {
-          await FinanceLocalStorage.downloadEmployees(widget.branchId);
-        }
+        // Fetch cloud attendance for target date and ensure employees box is populated
         await FinanceLocalStorage.downloadAttendance(widget.branchId, specificDateStr: dateStr);
+        unawaited(FinanceLocalStorage.downloadEmployees(widget.branchId));
       }
       await ZkTecoNetworkService.processPendingUnmappedPunches();
       if (mounted) setState(() {});
@@ -244,6 +244,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       }));
     } catch (e) {
       debugPrint('[EmployeeManagementTab] _syncPunches error: $e');
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
     }
   }
 
@@ -771,6 +773,37 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            // Sync & Refresh Pill Button
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: _isSyncing ? null : () => _syncPunches(widget.date, true),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: context.adapt(ExecTokens.secBtnSurface),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: context.adapt(ExecTokens.secBtnBorder)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _isSyncing
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        : Icon(Icons.sync_rounded, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+                    const SizedBox(width: 6),
+                    Text(
+                      _isSyncing ? 'Syncing...' : 'Sync & Refresh',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: context.adapt(ExecTokens.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
             // Calendar Filter Pill Button
             if (!_isViewingOffboarded)
               InkWell(

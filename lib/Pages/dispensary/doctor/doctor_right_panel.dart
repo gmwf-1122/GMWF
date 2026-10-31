@@ -273,44 +273,64 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       return;
     }
 
+    // Rebuild reserved quantities when any dispense or prescription
+    // save happens on the LAN, so stock counts stay accurate across patients.
+    if (type == 'dispense_completed' || type == RealtimeEvents.savePrescription) {
+      _buildReservedQuantities();
+    }
+
     final serial = data['serial'] as String?;
     if (serial == null || serial != widget.serialId) return;
+
+    final myId = RealtimeManager().clientId;
+    final senderId = (event['senderId'] ?? event['clientId'] ?? '').toString();
+    if (senderId.isNotEmpty && myId != null && senderId == myId) return;
 
     if (type == RealtimeEvents.saveEntry) {
       if (mounted) setState(() {});
     }
 
-    // ── FIX: Rebuild reserved quantities when any dispense or prescription
-    //         save happens on the LAN, so stock counts stay accurate.
-    if (type == 'dispense_completed' || type == RealtimeEvents.savePrescription) {
-      _buildReservedQuantities();
-    }
-
     if (type == RealtimeEvents.savePrescription) {
+      final incomingPrescriptions = (data['prescriptions'] ?? data['medicines'] ?? data['items']) as List<dynamic>?;
+      // Never let an empty remote event wipe out medicines the doctor has on screen
+      if (incomingPrescriptions == null && widget.prescriptions.isNotEmpty) return;
+      if (incomingPrescriptions != null && incomingPrescriptions.isEmpty && widget.prescriptions.isNotEmpty) return;
+
       setState(() {
-        widget.complaintController.text = data['complaint'] ?? data['condition'] ?? '';
-        widget.diagnosisController.text = data['diagnosis'] ?? '';
-        widget.prescriptions
-          ..clear()
-          ..addAll(
-            (data['prescriptions'] as List<dynamic>?)
-                    ?.map((e) => Map<String, dynamic>.from(e as Map))
-                    .toList() ?? [],
-          );
-        widget.labResults
-          ..clear()
-          ..addAll(
-            (data['labResults'] as List<dynamic>?)
-                    ?.map((e) => Map<String, dynamic>.from(e as Map))
-                    .toList() ?? [],
-          );
-        _selectedQuickTests
-          ..clear()
-          ..addAll(
-            widget.labResults
-                .map((l) => l['name']?.toString() ?? '')
-                .where(_currentQuickList.contains),
-          );
+        if (data['complaint'] != null || data['condition'] != null) {
+          widget.complaintController.text = data['complaint'] ?? data['condition'] ?? '';
+        }
+        if (data['diagnosis'] != null) {
+          widget.diagnosisController.text = data['diagnosis'] ?? '';
+        }
+        if (incomingPrescriptions != null) {
+          widget.prescriptions
+            ..clear()
+            ..addAll(
+              incomingPrescriptions
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList(),
+            );
+        }
+        final incomingLabs = (data['labResults'] ?? data['labTests'] ?? data['tests']) as List<dynamic>?;
+        if (incomingLabs != null) {
+          widget.labResults
+            ..clear()
+            ..addAll(
+              incomingLabs
+                  .whereType<Map>()
+                  .map((e) => Map<String, dynamic>.from(e))
+                  .toList(),
+            );
+          _selectedQuickTests
+            ..clear()
+            ..addAll(
+              widget.labResults
+                  .map((l) => l['name']?.toString() ?? '')
+                  .where(_currentQuickList.contains),
+            );
+        }
         final d = data['daysOfMedicine'];
         if (d is int && d >= 1 && d <= 3) _daysOfMedicine = d;
       });
@@ -2610,22 +2630,24 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 }
               } else {
                 final matchIdx = widget.prescriptions.indexWhere((m) {
-                  if (inv?['id'] != null && m['inventoryId'] != null) {
-                    final batchIds = (inv!['_batchIds'] as List?)?.map((e) => e.toString()).toSet() ?? <String>{};
-                    batchIds.add(inv['id'].toString());
-                    if (batchIds.contains(m['inventoryId'].toString())) return true;
+                  final invIdStr = inv?['id']?.toString().trim();
+                  final mInvIdStr = m['inventoryId']?.toString().trim();
+                  if (invIdStr != null && invIdStr.isNotEmpty && invIdStr != 'unknown' &&
+                      mInvIdStr != null && mInvIdStr.isNotEmpty && mInvIdStr != 'unknown') {
+                    final batchIds = (inv!['_batchIds'] as List?)?.map((e) => e.toString().trim()).toSet() ?? <String>{};
+                    batchIds.add(invIdStr);
+                    if (batchIds.contains(mInvIdStr)) return true;
                   }
                   final mName = (m['name'] ?? '').toString().trim().toLowerCase();
+                  final nName = name.trim().toLowerCase();
+                  if (mName.isEmpty || nName.isEmpty || mName != nName) return false;
                   final mType = (m['type'] ?? '').toString().toLowerCase().trim();
                   final mDose = (m['dose'] ?? m['dosage'] ?? '').toString().toLowerCase().trim();
-                  final nName = name.toLowerCase();
                   final nType = (newMed['type'] ?? '').toString().toLowerCase().trim();
                   final nDose = (newMed['dose'] ?? newMed['dosage'] ?? '').toString().toLowerCase().trim();
                   if (mType.isNotEmpty && nType.isNotEmpty && mType != nType) return false;
                   if (mDose.isNotEmpty && nDose.isNotEmpty && mDose != nDose) return false;
-                  return mName == nName &&
-                      (mType == nType || mType.isEmpty || nType.isEmpty) &&
-                      (mDose == nDose || mDose.isEmpty || nDose.isEmpty);
+                  return true;
                 });
                 if (matchIdx != -1) {
                   widget.prescriptions[matchIdx] = newMed;

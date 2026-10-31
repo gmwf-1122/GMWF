@@ -2171,20 +2171,29 @@ class _PatientQueueState extends State<PatientQueue> {
                                     const SizedBox(width: 8),
                                     Builder(
                                       builder: (context) {
-                                         final existingIdx = currentMeds.indexWhere((cm) {
-                                           if (m['id'] != null && cm['inventoryId'] != null) {
-                                             return cm['inventoryId'].toString() == m['id'].toString();
-                                           }
-                                           final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
-                                           final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
-                                           final cmDose = (cm['dose'] ?? cm['dosage'] ?? '').toString().toLowerCase().trim();
+                                         int findExistingIndex() {
+                                           final mId = (m['id'] ?? m['medicineId'])?.toString().trim();
                                            final nName = (m['name'] ?? '').toString().trim().toLowerCase();
                                            final nType = (m['type'] ?? m['dosageForm'] ?? m['form'] ?? '').toString().trim().toLowerCase();
                                            final nDose = (m['dose'] ?? '').toString().trim().toLowerCase();
-                                           return cmName == nName &&
-                                               (cmType.isEmpty || nType.isEmpty || cmType == nType) &&
-                                               (cmDose.isEmpty || nDose.isEmpty || cmDose == nDose);
-                                         });
+
+                                           return currentMeds.indexWhere((cm) {
+                                             final cmId = (cm['inventoryId'] ?? cm['medicineId'])?.toString().trim();
+                                             if (mId != null && mId.isNotEmpty && mId != 'unknown' &&
+                                                 cmId != null && cmId.isNotEmpty && cmId != 'unknown') {
+                                               return cmId == mId;
+                                             }
+                                             final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
+                                             if (cmName.isEmpty || nName.isEmpty || cmName != nName) return false;
+                                             final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
+                                             final cmDose = (cm['dose'] ?? cm['dosage'] ?? '').toString().toLowerCase().trim();
+                                             if (cmType.isNotEmpty && nType.isNotEmpty && cmType != nType) return false;
+                                             if (cmDose.isNotEmpty && nDose.isNotEmpty && cmDose != nDose) return false;
+                                             return true;
+                                           });
+                                         }
+
+                                         final existingIdx = findExistingIndex();
                                          final isAlreadyPrescribed = existingIdx != -1;
                                          final existingMed = isAlreadyPrescribed ? currentMeds[existingIdx] : null;
 
@@ -2237,20 +2246,29 @@ class _PatientQueueState extends State<PatientQueue> {
                                    ],
                                  ),
                                  onTap: () async {
-                                         final existingIdx = currentMeds.indexWhere((cm) {
-                                           if (m['id'] != null && cm['inventoryId'] != null) {
-                                             return cm['inventoryId'].toString() == m['id'].toString();
-                                           }
-                                           final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
-                                           final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
-                                           final cmDose = (cm['dose'] ?? cm['dosage'] ?? '').toString().toLowerCase().trim();
+                                         int findExistingIndex() {
+                                           final mId = (m['id'] ?? m['medicineId'])?.toString().trim();
                                            final nName = (m['name'] ?? '').toString().trim().toLowerCase();
                                            final nType = (m['type'] ?? m['dosageForm'] ?? m['form'] ?? '').toString().trim().toLowerCase();
                                            final nDose = (m['dose'] ?? '').toString().trim().toLowerCase();
-                                           return cmName == nName &&
-                                               (cmType.isEmpty || nType.isEmpty || cmType == nType) &&
-                                               (cmDose.isEmpty || nDose.isEmpty || cmDose == nDose);
-                                         });
+
+                                           return currentMeds.indexWhere((cm) {
+                                             final cmId = (cm['inventoryId'] ?? cm['medicineId'])?.toString().trim();
+                                             if (mId != null && mId.isNotEmpty && mId != 'unknown' &&
+                                                 cmId != null && cmId.isNotEmpty && cmId != 'unknown') {
+                                               return cmId == mId;
+                                             }
+                                             final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
+                                             if (cmName.isEmpty || nName.isEmpty || cmName != nName) return false;
+                                             final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
+                                             final cmDose = (cm['dose'] ?? cm['dosage'] ?? '').toString().toLowerCase().trim();
+                                             if (cmType.isNotEmpty && nType.isNotEmpty && cmType != nType) return false;
+                                             if (cmDose.isNotEmpty && nDose.isNotEmpty && cmDose != nDose) return false;
+                                             return true;
+                                           });
+                                         }
+
+                                         final existingIdx = findExistingIndex();
                                          final existingMed = existingIdx != -1 ? currentMeds[existingIdx] : null;
 
                                          final res = await _showAddMedicineSubDialog(
@@ -2436,10 +2454,21 @@ class _PatientQueueState extends State<PatientQueue> {
 
     Map<String, dynamic> prescData = {};
     Map<String, dynamic> entryData = {};
+    Map<String, dynamic> fallbackPresc = {};
 
-    // 1. Check if patient map already has prescription
+    bool hasMedicines(Map m) {
+      final meds = m['prescriptions'] ?? m['medicines'] ?? m['items'];
+      return meds is List && meds.isNotEmpty;
+    }
+
+    // 1. Check if patient map already has prescription with actual medicines
     if (patient['prescription'] is Map && (patient['prescription'] as Map).isNotEmpty) {
-      prescData = Map<String, dynamic>.from(patient['prescription'] as Map);
+      final pMap = Map<String, dynamic>.from(patient['prescription'] as Map);
+      if (hasMedicines(pMap)) {
+        prescData = pMap;
+      } else {
+        fallbackPresc = pMap;
+      }
     }
 
     // 2. Check entriesBox directly
@@ -2468,13 +2497,17 @@ class _PatientQueueState extends State<PatientQueue> {
         final rawEmb = entryData['prescription'];
         final embeddedPresc = (rawEmb is Map) ? Map<String, dynamic>.from(rawEmb) : null;
         if (embeddedPresc != null && embeddedPresc.isNotEmpty) {
-          prescData = Map<String, dynamic>.from(embeddedPresc);
-          debugPrint('[PrescEdit] Loaded from embedded entry prescription: $serial');
+          if (hasMedicines(embeddedPresc)) {
+            prescData = Map<String, dynamic>.from(embeddedPresc);
+            debugPrint('[PrescEdit] Loaded from embedded entry prescription: $serial');
+          } else if (fallbackPresc.isEmpty) {
+            fallbackPresc = Map<String, dynamic>.from(embeddedPresc);
+          }
         }
       }
     }
 
-    // 3. Check getLocalPrescription with patient credentials
+    // 3. Check getLocalPrescription with patient credentials & direct prescriptionsBox lookup
     if (prescData.isEmpty) {
       final localPresc = LocalStorageService.getLocalPrescription(
         serial,
@@ -2485,6 +2518,17 @@ class _PatientQueueState extends State<PatientQueue> {
       if (localPresc != null && localPresc.isNotEmpty) {
         prescData = Map<String, dynamic>.from(localPresc);
         debugPrint('[PrescEdit] Loaded from validated local prescription: $serial');
+      } else if (Hive.isBoxOpen(LocalStorageService.prescriptionsBox)) {
+        final pBox = Hive.box(LocalStorageService.prescriptionsBox);
+        final rawDirect = pBox.get(serial) ??
+            pBox.get(serial.toLowerCase()) ??
+            pBox.get(serial.toUpperCase()) ??
+            pBox.get('${branchId.toLowerCase()}-$serial') ??
+            pBox.get('${branchId.toLowerCase()}-${serial.toLowerCase()}');
+        if (rawDirect is Map && rawDirect.isNotEmpty) {
+          prescData = Map<String, dynamic>.from(rawDirect);
+          debugPrint('[PrescEdit] Loaded directly from prescriptionsBox: $serial');
+        }
       }
     }
 
@@ -2515,6 +2559,10 @@ class _PatientQueueState extends State<PatientQueue> {
       }
     }
 
+    if (prescData.isEmpty && fallbackPresc.isNotEmpty) {
+      prescData = fallbackPresc;
+    }
+
     if (prescData.isEmpty) {
       prescData = {
         'serial': serial,
@@ -2523,6 +2571,7 @@ class _PatientQueueState extends State<PatientQueue> {
         'prescriptions': <Map<String, dynamic>>[],
         'labResults': <Map<String, dynamic>>[],
         'condition': entryData['condition'] ?? '',
+        'complaint': entryData['complaint'] ?? entryData['condition'] ?? '',
         'diagnosis': entryData['diagnosis'] ?? '',
         'daysOfMedicine': entryData['daysOfMedicine'] ?? 1,
       };
@@ -2557,16 +2606,30 @@ class _PatientQueueState extends State<PatientQueue> {
     })();
 
     final complaintCtrl = TextEditingController(
-        text: prescData['condition'] ?? prescData['complaint'] ?? '');
+        text: prescData['condition'] ?? prescData['complaint'] ?? entryData['condition'] ?? entryData['complaint'] ?? '');
     final diagnosisCtrl = TextEditingController(
-        text: prescData['diagnosis'] ?? '');
+        text: prescData['diagnosis'] ?? entryData['diagnosis'] ?? '');
 
+    final rawMeds = prescData['prescriptions'] ??
+        prescData['medicines'] ??
+        prescData['items'] ??
+        entryData['prescriptions'] ??
+        entryData['medicines'] ??
+        entryData['items'] ??
+        patient['prescriptions'] ??
+        patient['medicines'] ??
+        patient['items'];
     List<Map<String, dynamic>> currentMeds = List<Map<String, dynamic>>.from(
-        (prescData['prescriptions'] as List<dynamic>?)
+        (rawMeds as List<dynamic>?)
             ?.map((e) => Map<String, dynamic>.from(e as Map))
             .toList() ?? []);
+    final rawLabs = prescData['labResults'] ??
+        prescData['labTests'] ??
+        prescData['tests'] ??
+        entryData['labResults'] ??
+        patient['labResults'];
     List<Map<String, dynamic>> currentLabs = List<Map<String, dynamic>>.from(
-        (prescData['labResults'] as List<dynamic>?)
+        (rawLabs as List<dynamic>?)
             ?.map((e) => Map<String, dynamic>.from(e as Map))
             .toList() ?? []);
 
@@ -3197,6 +3260,7 @@ class _PatientQueueState extends State<PatientQueue> {
       'complaint':       complaint,
       'diagnosis':       diagnosis,
       'prescriptions':   medicines,
+      'medicines':       medicines,
       'labResults':      labTests,
       'daysOfMedicine':  daysOfMedicine,
       'updatedAt':       now,
@@ -3226,6 +3290,8 @@ class _PatientQueueState extends State<PatientQueue> {
       final updated = existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
       updated['prescription']   = updatedPresc;
       updated['prescriptionId'] = serial;
+      updated['prescriptions']  = medicines;
+      updated['medicines']      = medicines;
       updated['status']         = 'completed';
       updated['completedAt']    = updatedPresc['completedAt'] ?? now;
       updated['daysOfMedicine'] = daysOfMedicine;

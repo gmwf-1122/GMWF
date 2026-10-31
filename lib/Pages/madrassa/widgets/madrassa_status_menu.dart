@@ -24,6 +24,7 @@ class StatusActionMenu extends StatelessWidget {
   final RoleThemeData t;
   final String username;
   final String role;
+  final VoidCallback? onStudentDeleted;
 
   const StatusActionMenu({
     super.key,
@@ -33,6 +34,7 @@ class StatusActionMenu extends StatelessWidget {
     required this.t,
     required this.username,
     required this.role,
+    this.onStudentDeleted,
   });
 
   Map<String, dynamic> _getStudentData() {
@@ -569,6 +571,10 @@ class StatusActionMenu extends StatelessWidget {
     final sData = _getStudentData();
     final studentName = sData['name'] ?? 'Student';
     final studentId = student is DocumentSnapshot ? (student as DocumentSnapshot).id : (student as Map)['id'].toString();
+    final sBranch = (sData['branchId'] ?? sData['branch'] ?? '').toString().toLowerCase().trim();
+    final targetBranch = (sBranch.isNotEmpty && sBranch != 'all' && sBranch != 'global')
+        ? sBranch
+        : branchId;
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -617,11 +623,11 @@ class StatusActionMenu extends StatelessWidget {
 
     if (confirm == true) {
       await MadrassaLocalStorage.permanentlyDeleteStudent(
-        branchId: branchId,
+        branchId: targetBranch,
         studentId: studentId,
       );
       await MadrassaAuditService.logAction(
-        branchId: branchId,
+        branchId: MadrassaLocalStorage.normalizeBranch(targetBranch),
         editor: username,
         role: role,
         type: 'delete_student',
@@ -629,6 +635,7 @@ class StatusActionMenu extends StatelessWidget {
         studentId: studentId,
         studentName: studentName,
       );
+      onStudentDeleted?.call();
       if (context.mounted) {
         AppToast.showSnackBar(context, 
           SnackBar(

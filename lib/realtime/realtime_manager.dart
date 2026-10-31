@@ -732,6 +732,13 @@ class RealtimeManager {
         _onServerIdentified();
       }
 
+      if (decoded['event_type'] == 'serial_reserved') {
+        final waiting = _serialRequests.remove(decoded['requestId']?.toString());
+        final seq = (decoded['seq'] as num?)?.toInt();
+        if (waiting != null && !waiting.isCompleted && seq != null) waiting.complete(seq);
+        return;
+      }
+
       // [IMM-ACK] Handle ACK from server (server confirmed our message).
       if (decoded['event_type'] == 'message_ack') {
         final ackedId = decoded['messageId']?.toString();
@@ -1065,6 +1072,44 @@ class RealtimeManager {
       branchId: credData['branchId']?.toString(),
     );
     sendMessage(payload);
+  }
+
+  /// Sends a live-only notice to the other desks: straight to the socket, never through the
+  /// outbox, so it is not replayed after a reconnect. False when there is no server link.
+  bool sendLive(Map<String, dynamic> payload) {
+    if (!hasServerLink || _channel == null) return false;
+    _sendRaw(payload);
+    return true;
+  }
+
+  // ── Token numbers ──────────────────────────────────────────────────────────
+  final Map<String, Completer<int>> _serialRequests = {};
+
+  /// Asks the LAN server for the next token number after [prefix] ('301026M-HAJI'), at least
+  /// [proposed] (this desk's own count). The server issues numbers one at a time for every
+  /// desk, so two desks can no longer give out the same token. Null when there is no server
+  /// link or no answer in [timeout] (older server build): the caller uses its own count.
+  /// Sent straight to the socket, never through the outbox: a request replayed later would
+  /// only use up a number.
+  Future<int?> reserveSerial(String prefix, int proposed,
+      {Duration timeout = const Duration(milliseconds: 1500)}) async {
+    if (!hasServerLink || _channel == null) return null;
+    final requestId = const Uuid().v4();
+    final waiting = Completer<int>();
+    _serialRequests[requestId] = waiting;
+    _sendRaw({
+      'event_type': 'reserve_serial',
+      'requestId':  requestId,
+      'prefix':     prefix,
+      'proposed':   proposed,
+    });
+    try {
+      return await waiting.future.timeout(timeout);
+    } catch (_) {
+      return null;
+    } finally {
+      _serialRequests.remove(requestId);
+    }
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────

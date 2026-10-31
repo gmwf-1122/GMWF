@@ -144,6 +144,9 @@ class RealtimeRouter {
     RealtimeEvents.saveMadrassaAttendance: {LocalStorageService.madrassaLogsBox},
     RealtimeEvents.saveMadrassaDailyLog: {LocalStorageService.madrassaLogsBox},
     RealtimeEvents.saveMadrassaFeePayment: {LocalStorageService.madrassaFeesBox},
+    RealtimeEvents.saveMadrassaTeacherAttendance: {LocalStorageService.madrassaLogsBox},
+    'save_madrassa_holiday': {LocalStorageService.madrassaHolidaysBox},
+    'delete_madrassa_holiday': {LocalStorageService.madrassaHolidaysBox},
     RealtimeEvents.saveDonationReceipt: {LocalStorageService.donationsBox},
     RealtimeEvents.saveDonor: {LocalStorageService.donationsBox},
     RealtimeEvents.saveDonationCollection: {LocalStorageService.donationsBox},
@@ -156,7 +159,7 @@ class RealtimeRouter {
   };
 
   static const Set<String> _counterTypes = {
-    'save_dasterkhwan_tokens',
+    // 'save_dasterkhwan_tokens' is deduplicated via appliedBatches, so LAN server can safely upload client tokens
     'reverse_dasterkhwan_tokens',
     'serve_dasterkhwan_token',
   };
@@ -481,6 +484,10 @@ Serial: ${data['serial'] ?? 'N/A'}
       case RealtimeEvents.saveMadrassaFeePayment:
       case RealtimeEvents.saveMadrassaHifzProgress:
       case RealtimeEvents.saveExamResult:
+      // Teacher attendance and holidays used to fall through to `default`, so other PCs never got them.
+      case RealtimeEvents.saveMadrassaTeacherAttendance:
+      case 'save_madrassa_holiday':
+      case 'delete_madrassa_holiday':
         await _handleMadrassaEvent(type, data);
         break;
 
@@ -690,10 +697,10 @@ Serial: ${data['serial'] ?? 'N/A'}
         final kStr = k.toString().toLowerCase().trim();
         if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
           final entry = box.get(k);
-          if (entry is Map) {
+          if (entry is Map && !LocalStorageService.isOlderPrescription(data, entry['prescription'])) {
             final updated = Map<String, dynamic>.from(entry);
             updated['status']         = 'completed';
-            updated['prescription']   = data;
+            updated['prescription']   = LocalStorageService.prescriptionForEmbedding(data);
             updated['prescriptionId'] = data['id'] ?? serial;
             updated['completedAt']    =
                 data['completedAt'] ?? DateTime.now().toIso8601String();
@@ -1236,11 +1243,33 @@ Serial: ${data['serial'] ?? 'N/A'}
 
   static Future<void> _handleMadrassaEvent(String type, Map<String, dynamic> data) async {
     try {
+      // Cache only: the PC that saved these uploads them.
+      if (type == RealtimeEvents.saveMadrassaTeacherAttendance) {
+        final branchId = data['branchId']?.toString() ?? '';
+        final dateKey = (data['dateKey'] ?? data['date'])?.toString() ?? '';
+        if (branchId.isNotEmpty && dateKey.isNotEmpty) {
+          await MadrassaLocalStorage.cacheTeacherAttendance(branchId, dateKey, data);
+        }
+        return;
+      }
+      if (type == 'save_madrassa_holiday' || type == 'delete_madrassa_holiday') {
+        final branchId = data['branchId']?.toString() ?? '';
+        final id = data['id']?.toString() ?? '';
+        if (branchId.isNotEmpty && id.isNotEmpty) {
+          await MadrassaLocalStorage.cacheHoliday(branchId, id, type == 'delete_madrassa_holiday' ? null : data);
+        }
+        return;
+      }
       if (type == RealtimeEvents.saveMadrassaStudent || type == RealtimeEvents.saveMadrassaAdmission) {
         final branchId = data['branchId']?.toString() ?? '';
         final studentId = data['studentId']?.toString() ?? data['id']?.toString() ?? '';
         if (branchId.isNotEmpty && studentId.isNotEmpty) {
-          await MadrassaLocalStorage.cacheStudent(branchId, studentId, data);
+          // The sender uploads it; arriving as 'pending' made every PC's backfill re-upload it.
+          await MadrassaLocalStorage.cacheStudent(branchId, studentId, {
+            ...data,
+            'syncStatus': 'synced',
+            'pendingSync': false,
+          });
           if (kDebugMode) print('✅ MADRASSA STUDENT cached via LAN → $studentId');
           return;
         }
@@ -1276,7 +1305,27 @@ Serial: ${data['serial'] ?? 'N/A'}
           return;
         }
       }
-      if (type == RealtimeEvents.offboardMadrassaStudent || type == RealtimeEvents.deleteMadrassaStudent) {
+      if (type == RealtimeEvents.deleteMadrassaStudent) {
+        final studentId = data['studentId']?.toString() ?? data['id']?.toString() ?? '';
+        if (studentId.isNotEmpty) {
+          final box = await LocalStorageService.ensureBoxOpen(LocalStorageService.madrassaStudentsBox);
+          final cleanId = studentId.contains('__std__') ? studentId.split('__std__').last.trim() : studentId.trim();
+          final keysToDelete = box.keys.where((k) {
+            final str = k.toString();
+            final kId = str.contains('__std__')
+                ? str.split('__std__').last.trim()
+                : (str.startsWith('madrassa_std_') ? str.replaceFirst('madrassa_std_', '').trim() : str.trim());
+            return kId == cleanId;
+          }).toList();
+          for (final k in keysToDelete) {
+            await box.delete(k);
+          }
+          await box.flush();
+          if (kDebugMode) print('✅ MADRASSA STUDENT permanently deleted via LAN → $studentId');
+          return;
+        }
+      }
+      if (type == RealtimeEvents.offboardMadrassaStudent) {
         final branchId = data['branchId']?.toString() ?? '';
         final studentId = data['studentId']?.toString() ?? data['id']?.toString() ?? '';
         final status = data['status']?.toString() ?? 'left';

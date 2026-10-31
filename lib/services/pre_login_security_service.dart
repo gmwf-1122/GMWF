@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'device_info_service.dart';
+import 'quota_service.dart';
 
 class PreLoginSecurityService {
   static const String _deviceIdKey = 'gmwf_secure_device_id';
@@ -44,6 +45,7 @@ class PreLoginSecurityService {
   /// Logs pre-login app launches to Firestore security_access_logs.
   static Future<void> logAppLaunch() async {
     try {
+      if (QuotaService.isPausedForDailyReset) return;
       final prefs = await SharedPreferences.getInstance();
       final lastLogMs = prefs.getInt('pre_login_last_logged_at') ?? 0;
       final nowMs = DateTime.now().millisecondsSinceEpoch;

@@ -56,6 +56,10 @@ class NetworkHealthService {
     _isChecking = true;
 
     try {
+      if (kIsWeb) {
+        _updateState(NetworkQualityState.onlineStable);
+        return;
+      }
       final results = await Connectivity().checkConnectivity();
       final hasInterface = results.any((r) => r != ConnectivityResult.none);
 
@@ -92,19 +96,33 @@ class NetworkHealthService {
       final stopwatch = Stopwatch()..start();
       // Mobile gets a longer timeout to accommodate cellular latency
       final pingTimeout = Duration(milliseconds: _isMobilePlatform ? 4000 : 2500);
-      final latencyThreshold = _isMobilePlatform ? 6000 : 3500;
+      final latencyThreshold = _isMobilePlatform ? 7000 : 3500;
 
-      // Primary probe: Cloudflare 1.1.1.1 HTTPS (port 443) — open everywhere, never blocked by DNS filters
-      bool ok = await Socket.connect('1.1.1.1', 443, timeout: pingTimeout)
-          .then((socket) {
-            socket.destroy();
-            return true;
-          })
-          .catchError((_) => false);
+      // 1. Android/OS-native captive portal probe: connectivitycheck.gstatic.com (generate_204)
+      bool ok = false;
+      try {
+        final client = HttpClient()..connectionTimeout = pingTimeout;
+        final req = await client.getUrl(Uri.parse('http://connectivitycheck.gstatic.com/generate_204')).timeout(pingTimeout);
+        final resp = await req.close().timeout(pingTimeout);
+        client.close(force: true);
+        if (resp.statusCode == 204 || resp.statusCode == 200) {
+          ok = true;
+        }
+      } catch (_) {}
 
-      // Secondary probe: Google 8.8.8.8 HTTPS (port 443)
+      // 2. DNS resolve probe to google.com / cloudflare.com
       if (!ok) {
-        ok = await Socket.connect('8.8.8.8', 443, timeout: pingTimeout)
+        try {
+          final res = await InternetAddress.lookup('google.com').timeout(pingTimeout);
+          if (res.isNotEmpty && res[0].rawAddress.isNotEmpty) {
+            ok = true;
+          }
+        } catch (_) {}
+      }
+
+      // 3. Socket probe: Cloudflare 1.1.1.1 HTTPS (port 443) fallback
+      if (!ok) {
+        ok = await Socket.connect('1.1.1.1', 443, timeout: pingTimeout)
             .then((socket) {
               socket.destroy();
               return true;
@@ -112,9 +130,9 @@ class NetworkHealthService {
             .catchError((_) => false);
       }
 
-      // Tertiary probe: Google DNS 8.8.8.8 port 53 fallback
+      // 4. Secondary socket probe: Google 8.8.8.8 HTTPS (port 443)
       if (!ok) {
-        ok = await Socket.connect('8.8.8.8', 53, timeout: pingTimeout)
+        ok = await Socket.connect('8.8.8.8', 443, timeout: pingTimeout)
             .then((socket) {
               socket.destroy();
               return true;

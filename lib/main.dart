@@ -38,6 +38,7 @@ import 'services/python_runner_service.dart';
 import 'realtime/server_sync_manager.dart';
 import 'realtime/realtime_router.dart';
 import 'services/cloud_messaging_service.dart';
+import 'services/user_theme_service.dart';
 import 'services/auth_service.dart';
 import 'widgets/gmwf_loading_view.dart';
 import 'widgets/custom_title_bar.dart';
@@ -267,6 +268,7 @@ Future<void> main() async {
 
         try {
           await Hive.openBox('app_settings');
+          UserThemeService.init();
         } catch (hiveErr) {
           debugPrint('[Main] Hive app_settings box error: $hiveErr');
         }
@@ -607,7 +609,7 @@ class _MyAppState extends State<MyApp> {
                     }
 
                     final cardRadius = (box.get('card_radius', defaultValue: 16.0) as num).toDouble();
-                    final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
+                    final isDarkMode = UserThemeService.isDarkMode();
                     final language = box.get('language', defaultValue: 'en') as String;
                     final isUrdu = language == 'ur';
 
@@ -907,4 +909,4 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
       },
     );
   }
-}
+}

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:gmwf/design/tokens/soft_palette.dart';
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show listEquals, kIsWeb;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -227,7 +227,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     return raw.where((d) {
       // Branch scoping: when a specific branch is selected, strictly exclude other branches
       if (widget.branchId != 'all' && widget.branchId.isNotEmpty) {
-        final target = widget.branchId.toLowerCase().trim();
+        final target = LocalStorageService.sanitizeBranchId(widget.branchId, fallback: widget.branchId.toLowerCase().trim());
         final bId = d.branchId.toLowerCase().trim();
         final bName = d.branchName.toLowerCase().trim();
 
@@ -712,6 +712,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
 
     final String? outputFile = await FilePicker.platform.saveFile(
       dialogTitle: 'Save Excel Report',
+      // Android, iOS and web require the bytes and write the file themselves.
+      bytes: Uint8List.fromList(bytes),
       fileName:
           'GMWF_Donations_${DateFormat('yyyyMMdd').format(DateTime.now())}.xlsx',
       type: FileType.custom,
@@ -720,7 +722,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
 
     if (outputFile != null) {
       final file = File(outputFile);
-      await file.writeAsBytes(bytes);
+      if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS) await file.writeAsBytes(bytes);
       if (mounted) {
         AppToast.showSnackBar(context, SnackBar(
             content: Text('Report saved to: $outputFile'),
@@ -1243,8 +1245,25 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
         targetBranchName = firstRecord['branchName']?.toString() ?? targetBranchId;
       }
     }
+    targetBranchId = LocalStorageService.sanitizeBranchId(targetBranchId, fallback: targetBranchId);
+
+    if (!mounted) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Import donations?'),
+        content: Text('$total records will be imported into $targetBranchName. '
+            'Rows from earlier imports for this branch are replaced; donations entered by hand are kept.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Import')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
 
     bool importCancelled = false;
+    bool progressOpen = true;
 
     // Show Progress Dialog
     showDialog(
@@ -1306,6 +1325,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                         OutlinedButton.icon(
                           onPressed: () {
                             importCancelled = true;
+                            progressOpen = false;
                             Navigator.of(dialogCtx).pop();
                           },
                           icon: const Icon(Icons.cancel_outlined, color: SoftPalette.red400, size: 16),
@@ -1328,12 +1348,17 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     );
 
     try {
+      // Replace only rows from earlier imports (localId 'import_…', which
+      // includes the row index, so a re-import would otherwise duplicate).
+      // Donations entered by hand must survive an import.
       final box = DonationsLocalStorage.getBox();
       final keysToDelete = <dynamic>[];
       for (var key in box.keys) {
         final keyStr = key.toString();
-        if (keyStr.startsWith('${targetBranchId}_') || 
-            keyStr.startsWith('${targetBranchId}__')) {
+        if (!keyStr.startsWith('${targetBranchId}_')) continue;
+        final v = box.get(key);
+        final localId = (v is Map ? v['localId'] : null)?.toString() ?? '';
+        if (localId.startsWith('import_') || keyStr.contains('__import_')) {
           keysToDelete.add(key);
         }
       }
@@ -1342,12 +1367,15 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       }
       await box.flush();
 
-      // Also clear branch donations from Firestore to prevent double counting/backfill
+      // Same for the cloud copy; the range query reads only imported docs.
       final firestoreSnap = await FirebaseFirestore.instance
           .collection('branches')
           .doc(targetBranchId)
           .collection('donations')
-          .get();
+          .where('localId', isGreaterThanOrEqualTo: 'import_')
+          .where('localId', isLessThan: 'import`')
+          .get()
+          .timeout(const Duration(seconds: 30));
       for (final doc in firestoreSnap.docs) {
         await doc.reference.delete();
       }
@@ -1395,7 +1423,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       debugPrint("Import Error: $e");
     } finally {
       if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(); // Dismiss progress dialog safely
+        // Cancel already closed the progress dialog; popping again would close this screen.
+        if (progressOpen) Navigator.of(context, rootNavigator: true).pop();
         AppToast.showSnackBar(context, SnackBar(
           content: Text('Import complete! Processed $total records: $imported new, $skipped updated/overwritten in $targetBranchName branch.'),
           backgroundColor: SoftPalette.green400,
@@ -2157,7 +2186,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                         children: [
                           Text('${data.count} entries', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray400))),
                           Text('PKR ${NumberFormat('#,###').format(data.received + data.pending)}', 
-                              style: GoogleFonts.dmMono(fontSize: 11, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
+                              style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 11, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
                         ],
                       ),
                     ],
@@ -2177,7 +2206,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       children: [
         Text(label, style: TextStyle(fontSize: 11, color: context.adapt(AppColors.gray500), fontWeight: FontWeight.w500)),
         Text('PKR ${NumberFormat('#,###').format(value)}', 
-            style: GoogleFonts.dmMono(
+            style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()],
               fontSize: 12, 
               fontWeight: isBold ? FontWeight.w900 : FontWeight.w700, 
               color: isBold ? color : context.adapt(AppColors.gray700),

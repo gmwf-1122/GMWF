@@ -600,8 +600,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
   Future<void> _confirmDeleteStudent(BuildContext context, Map<String, dynamic> studentData) async {
     final studentName = studentData['name'] ?? 'Student';
-    final studentId = studentData['id']?.toString() ?? '';
-    final branchId = widget.branchId;
+    final studentId = (studentData['id'] ?? studentData['docId'] ?? studentData['studentId'])?.toString() ?? '';
+    final studentBranch = (studentData['branchId'] ?? studentData['branch'] ?? '').toString().toLowerCase().trim();
+    final branchId = (studentBranch.isNotEmpty && studentBranch != 'all' && studentBranch != 'global')
+        ? studentBranch
+        : _effectiveBranch;
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -654,7 +657,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         studentId: studentId,
       );
       await MadrassaAuditService.logAction(
-        branchId: branchId,
+        branchId: MadrassaLocalStorage.normalizeBranch(branchId),
         editor: widget.username,
         role: widget.role,
         type: 'delete_student',
@@ -663,8 +666,9 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         studentName: studentName,
       );
       if (mounted) {
+        ref.invalidate(madrassaStudentsProvider(_effectiveBranch));
         setState(() {});
-        AppToast.showSnackBar(context, 
+        AppToast.showSnackBar(this.context, 
           SnackBar(
             content: Text('$studentName deleted successfully'),
             backgroundColor: SoftPalette.red400,
@@ -1714,6 +1718,9 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                       t: RoleThemeScope.dataOf(context),
                                                       username: widget.username,
                                                       role: widget.role,
+                                                      onStudentDeleted: () {
+                                                        ref.invalidate(madrassaStudentsProvider(_effectiveBranch));
+                                                      },
                                                     ),
                                                   ],
                                                 ),

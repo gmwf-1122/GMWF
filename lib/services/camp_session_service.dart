@@ -1264,6 +1264,9 @@ class CampSessionService {
     if (b.contains('jalal') || b.contains('jattan') || b == 'jlj' || b == 'jpj') {
       return const ['jalalpurjattan', 'jalalpur_jattan'];
     }
+    if (b.contains('karachi') || b.contains('khi') || b == 'saddar' || b == 'haji') {
+      return const ['karachi', 'karachi_saddar', 'saddar', 'karachi_haji'];
+    }
     return [b];
   }
 
@@ -1286,22 +1289,41 @@ class CampSessionService {
     final tag = (dispensaryTag ?? '').toUpperCase();
     final c = (campId ?? '').toLowerCase().trim();
 
-    // 1. Check dynamic camps configured for this branch
+    // 1. Immutable Serial / Tag Check (Highest Priority — never overridden by host PC activeCamp)
+    if (isKarachiFamily(b)) {
+      if (ser.contains('-HAJI-') || ser.contains('-HC-') || tag == 'HAJI' || tag == 'HC' || tag == 'HAJICAMP') {
+        return '${dateKey}_haji';
+      }
+      if (ser.contains('-SADD-') || ser.contains('-KAP-') || tag == 'SADD' || tag == 'KAP' || tag == 'SADDAR') {
+        return '${dateKey}_saddar';
+      }
+    }
+
     final camps = getCampsForBranch(b, includeClosed: true);
+
+    // 2. Exact Serial / Tag match across dynamically configured camps
     for (final camp in camps) {
       final id = (camp['id'] ?? '').toString().toLowerCase().trim();
-      final name = (camp['name'] ?? '').toString().toLowerCase().trim();
       final cTag = (camp['dispensaryTag'] ?? camp['tag'] ?? '').toString().toUpperCase().trim();
       if (id.isEmpty) continue;
       final docId = '${dateKey}_${_campDocSuffix(b, id)}';
 
-      if (c == id || (c.isNotEmpty && (c.contains(id) || id.contains(c)))) {
-        return docId;
-      }
       if (cTag.isNotEmpty && (tag == cTag || ser.contains('-$cTag-') || ser.contains('-$cTag'))) {
         return docId;
       }
       if (id.length >= 3 && (ser.contains('-$id-') || ser.contains('-$id') || ser.contains(id.toUpperCase()))) {
+        return docId;
+      }
+    }
+
+    // 3. Fallback: match by explicit campId or camp name
+    for (final camp in camps) {
+      final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+      final name = (camp['name'] ?? '').toString().toLowerCase().trim();
+      if (id.isEmpty) continue;
+      final docId = '${dateKey}_${_campDocSuffix(b, id)}';
+
+      if (c == id || (c.isNotEmpty && (c.contains(id) || id.contains(c)))) {
         return docId;
       }
       if (name.isNotEmpty && c == name) {
@@ -1309,15 +1331,15 @@ class CampSessionService {
       }
     }
 
-    // 2. Karachi legacy fallback
-    if (ser.contains('-HAJI-') || ser.contains('-HC-') || tag == 'HAJI' || tag == 'HC' || c.contains('haji')) {
+    // 4. Karachi legacy fallback by campId / branch
+    if (c.contains('haji')) {
       return '${dateKey}_haji';
     }
     if (isKarachiFamily(b)) {
       return '${dateKey}_saddar';
     }
 
-    // 3. Fallback: if branch has configured camps, pick first active camp
+    // 5. Fallback: if branch has configured camps, pick first active camp
     if (camps.isNotEmpty) {
       final firstId = (camps.first['id'] ?? '').toString().toLowerCase().trim();
       if (firstId.isNotEmpty) return '${dateKey}_${_campDocSuffix(b, firstId)}';
@@ -1399,16 +1421,24 @@ class CampSessionService {
     final tag = (dispensaryTag ?? '').toUpperCase();
     final c = (campId ?? '').toLowerCase().trim();
 
-    // 1. Dynamic camps check
+    // 1. Immutable Serial / Tag Check (Highest Priority)
+    if (isKarachiFamily(b)) {
+      if (ser.contains('-HAJI-') || ser.contains('-HC-') || tag == 'HAJI' || tag == 'HC' || tag == 'HAJICAMP') {
+        return 'inventory_haji';
+      }
+      if (ser.contains('-SADD-') || ser.contains('-KAP-') || tag == 'SADD' || tag == 'KAP' || tag == 'SADDAR') {
+        return 'inventory_saddar';
+      }
+    }
+
     final camps = getCampsForBranch(b, includeClosed: true);
+
+    // 2. Exact Serial / Tag match across dynamically configured camps
     for (final camp in camps) {
       final id = (camp['id'] ?? '').toString().toLowerCase().trim();
       final cTag = (camp['dispensaryTag'] ?? camp['tag'] ?? '').toString().toUpperCase().trim();
       if (id.isEmpty) continue;
 
-      if (c == id || (c.isNotEmpty && (c.contains(id) || id.contains(c)))) {
-        return 'inventory_$id';
-      }
       if (cTag.isNotEmpty && (tag == cTag || ser.contains('-$cTag-') || ser.contains('-$cTag'))) {
         return 'inventory_$id';
       }
@@ -1417,15 +1447,25 @@ class CampSessionService {
       }
     }
 
-    // 2. Karachi legacy check
-    if (ser.contains('-HAJI-') || ser.contains('-HC-') || tag == 'HAJI' || tag == 'HC' || c.contains('haji')) {
+    // 3. Fallback: match by explicit campId
+    for (final camp in camps) {
+      final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+      if (id.isEmpty) continue;
+
+      if (c == id || (c.isNotEmpty && (c.contains(id) || id.contains(c)))) {
+        return 'inventory_$id';
+      }
+    }
+
+    // 4. Karachi legacy check
+    if (c.contains('haji')) {
       return 'inventory_haji';
     }
     if (isKarachiFamily(b)) {
       return 'inventory_saddar';
     }
 
-    // 3. Fallback: first camp if available
+    // 5. Fallback: first camp if available
     if (camps.isNotEmpty) {
       final firstId = (camps.first['id'] ?? '').toString().toLowerCase().trim();
       if (firstId.isNotEmpty) return 'inventory_$firstId';

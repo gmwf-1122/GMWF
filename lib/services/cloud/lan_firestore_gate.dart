@@ -57,6 +57,19 @@ class LanFirestoreGate {
     } catch (_) {}
   }
 
+  /// Updates the cached role when a user logs in or switches roles.
+  static void updateRole(String? role) {
+    final r = role?.toLowerCase().trim();
+    if (r != null && r.isNotEmpty) {
+      _cachedRole = r;
+      if (!isDispensaryDeskRole(r)) {
+        if (_active) {
+          unawaited(_setActive(false));
+        }
+      }
+    }
+  }
+
   /// Desk roles that only work on dispensary data. Admins, HQ, supervisors and the like keep
   /// their cloud views even on the LAN. (LocalStorageService.isDispensaryRole matches loose
   /// substrings such as 'rec' and 'doc', which would also catch 'director'.)
@@ -64,7 +77,10 @@ class LanFirestoreGate {
   static bool isDispensaryDeskRole(String? role) {
     final r = (role ?? '').toLowerCase().trim();
     if (r.isEmpty) return false;
-    const exclude = ['admin', 'hq', 'supervisor', 'chairman', 'director', 'ceo', 'manager', 'owner', 'auditor'];
+    const exclude = [
+      'admin', 'hq', 'supervisor', 'chairman', 'director', 'ceo', 'manager', 'owner', 'auditor',
+      'madrassa', 'teacher', 'school', 'principal', 'qari', 'nazim', 'education', 'donation', 'collector'
+    ];
     if (exclude.any(r.contains)) return false;
     // Hybrid desks are routed by combined codes: rec+dis, doc+rec, doc+dis, doc+rec+dis.
     if (r.contains('+')) {

@@ -1239,6 +1239,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
     final receiptNoCtrl = TextEditingController();
     final notesCtrl = TextEditingController();
     DateTime selectedDate = DateTime.now();
+    bool saving = false; // a double click recorded two openings + two donations
 
     showDialog(
       context: context,
@@ -1343,6 +1344,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                           Expanded(
                             child: ElevatedButton(
                               onPressed: () async {
+                                if (saving) return;
                                 if (selectedDate.isAfter(DateTime.now())) {
                                   AppToast.showSnackBar(ctx, 
                                     const SnackBar(content: Text('Cannot record donation box openings for future dates'), backgroundColor: SoftPalette.red400),
@@ -1356,6 +1358,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                                   );
                                   return;
                                 }
+                                saving = true;
                                 final receiptNo = receiptNoCtrl.text.trim();
                                 final opening = DonationBoxStorage.createOpening(
                                   boxId: box.id,
@@ -1982,7 +1985,7 @@ class _BoxCardState extends State<_BoxCard> {
                       child: Center(
                         child: Text(
                           box.boxNumber.replaceAll('BOX-', ''),
-                          style: GoogleFonts.dmMono(
+                          style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()],
                             fontSize: 15,
                             fontWeight: FontWeight.w800,
                             color: statusColor,
@@ -2436,7 +2439,7 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                     child: Center(
                       child: Text(
                         box.boxNumber.replaceAll('BOX-', ''),
-                        style: GoogleFonts.dmMono(
+                        style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()],
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
                           color: box.isCompromised ? SoftPalette.red500 : t.accent,
@@ -3391,7 +3394,7 @@ class _OpeningTimelineItem extends StatelessWidget {
                   ),
                   Text(
                     'PKR ${fmt.format(opening.amount)}',
-                    style: GoogleFonts.dmMono(fontSize: 14, fontWeight: FontWeight.w800, color: SoftPalette.emerald550),
+                    style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 14, fontWeight: FontWeight.w800, color: SoftPalette.emerald550),
                   ),
                 ],
               ),
@@ -3593,7 +3596,7 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                         const SizedBox(height: 3),
                         Text(
                           'PKR ${fmt.format(s.totalMoneyOutput)}',
-                          style: GoogleFonts.dmMono(fontSize: 16, fontWeight: FontWeight.w900, color: SoftPalette.emerald550),
+                          style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 16, fontWeight: FontWeight.w900, color: SoftPalette.emerald550),
                         ),
                         Text('${s.totalOpeningsCount} collections', style: TextStyle(fontSize: 10.5, color: t.textTertiary)),
                       ],
@@ -3746,7 +3749,7 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                               ),
                               child: Text(
                                 box.boxNumber,
-                                style: GoogleFonts.dmMono(fontSize: 12, fontWeight: FontWeight.w800, color: bColor),
+                                style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 12, fontWeight: FontWeight.w800, color: bColor),
                               ),
                             ),
                             const SizedBox(width: 8),

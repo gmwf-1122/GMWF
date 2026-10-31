@@ -373,6 +373,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
   }
 
   Future<void> _submit() async {
+    if (_saving) return; // Enter in the notes field + button click
     setState(() => _error = null);
 
     final amount = double.tryParse(_amountCtrl.text) ?? 0.0;

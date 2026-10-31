@@ -57,6 +57,9 @@ class MadrassaLocale {
   final String futureDateSubtitle = 'Daily Log is not available for future dates.';
 
   final String present = 'Present';
+  final String onTime = 'On Time';
+  final String late = 'Late';
+  final String timing = 'Timing';
   final String leave = 'Leave';
   final String sent = 'Sent';
   final String absent = 'Absent';
@@ -67,6 +70,7 @@ class MadrassaLocale {
   final String attendance = 'Attendance';
 
   final String legendPresent = 'Present';
+  final String legendLate = 'Late';
   final String legendLeave = 'Leave';
   final String legendSent = 'Sent';
   final String legendAbsent = 'Absent';
@@ -350,6 +354,12 @@ class MadrassaLocaleUr extends MadrassaLocale {
   @override
   final String present = 'حاضر';
   @override
+  final String onTime = 'بروقت';
+  @override
+  final String late = 'تاخیر';
+  @override
+  final String timing = 'وقت / آمد';
+  @override
   final String leave = 'رخصت';
   @override
   final String sent = 'بھیج دیا';
@@ -368,6 +378,8 @@ class MadrassaLocaleUr extends MadrassaLocale {
 
   @override
   final String legendPresent = 'حاضر';
+  @override
+  final String legendLate = 'تاخیر';
   @override
   final String legendLeave = 'رخصت';
   @override

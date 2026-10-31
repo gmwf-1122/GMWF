@@ -19,6 +19,7 @@ import '../theme/app_theme.dart';
 import '../services/local_storage_service.dart';
 import '../services/offline_auth_service.dart';
 import '../services/auth_service.dart';
+import '../services/user_theme_service.dart';
 import '../services/image_upload_service.dart';
 import '../widgets/global_module_wrapper.dart';
 import '../widgets/app_back_button.dart';
@@ -4076,22 +4077,38 @@ class _UsersScreenState extends State<UsersScreen>
 
     showDialog(
       context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.65),
       builder: (ctx) {
+        final isDark = UserThemeService.isDarkMode() ||
+            Theme.of(context).brightness == Brightness.dark ||
+            t.isDarkCanvas;
+
+        // Solid executive palette tokens (zero translucency / zero glassmorphic slop)
+        final cardBgColor = isDark ? const Color(0xFF18181B) : Colors.white;
+        final cardBorderColor = isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0);
+        final textPrimaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
+        final textSecondaryColor = isDark ? const Color(0xFFA1A1AA) : const Color(0xFF64748B);
+        final innerSpacerColor = isDark ? const Color(0xFF18181B) : Colors.white;
+        final surfaceCardColor = isDark ? const Color(0xFF27272A) : const Color(0xFFF8FAFC);
+
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 520),
-            padding: const EdgeInsets.all(24),
+            constraints: const BoxConstraints(maxWidth: 440),
+            padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
             decoration: BoxDecoration(
-              color: SoftPalette.slate900,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.8),
+              color: cardBgColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: cardBorderColor,
+                width: 1.0,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: t.accent.withValues(alpha: 0.25),
-                  blurRadius: 30,
-                  spreadRadius: 2,
+                  color: isDark ? const Color(0x66000000) : const Color(0x14000000),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
@@ -4104,79 +4121,166 @@ class _UsersScreenState extends State<UsersScreen>
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.account_circle_rounded, color: t.accent, size: 22),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Profile Photo',
-                          style: TextStyle(
-                            color: SoftPalette.gray50,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
+                        Container(
+                          padding: const EdgeInsets.all(7.5),
+                          decoration: BoxDecoration(
+                            color: surfaceCardColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: cardBorderColor),
                           ),
+                          child: Icon(Icons.shield_outlined, color: textPrimaryColor, size: 18),
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Profile Photo',
+                              style: TextStyle(
+                                color: textPrimaryColor,
+                                fontSize: 16.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                            Text(
+                              'Executive Identity & Avatar',
+                              style: TextStyle(
+                                color: textSecondaryColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
-                      onPressed: () => Navigator.pop(ctx),
-                      tooltip: 'Close',
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () => Navigator.pop(ctx),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: surfaceCardColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: cardBorderColor),
+                          ),
+                          child: Icon(Icons.close_rounded, size: 18, color: textSecondaryColor),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 22),
 
-                // Enlarged Avatar Container (320px x 320px)
+                // Solid Tactile Avatar Showcase (zero glow halos / zero sweep gradients)
                 Container(
-                  width: 320,
-                  height: 320,
+                  width: 220,
+                  height: 220,
                   decoration: BoxDecoration(
+                    color: innerSpacerColor,
                     shape: BoxShape.circle,
-                    border: Border.all(color: SoftPalette.amber300, width: 4.0),
+                    border: Border.all(
+                      color: isDark ? const Color(0xFF3F3F46) : const Color(0xFFCBD5E1),
+                      width: 3.0,
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: SoftPalette.amber300.withValues(alpha: 0.45),
-                        blurRadius: 24,
-                        spreadRadius: 3,
+                        color: isDark ? const Color(0x40000000) : const Color(0x10000000),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
                       ),
                     ],
                   ),
+                  padding: const EdgeInsets.all(4.0),
                   child: ClipOval(
                     child: photoUrl != null && photoUrl.trim().isNotEmpty
                         ? (bytes != null
-                            ? Image.memory(bytes, fit: BoxFit.cover, width: 320, height: 320)
-                            : Image.network(photoUrl, fit: BoxFit.cover, width: 320, height: 320, errorBuilder: (_, _, _) => _buildFallbackAvatar(name, t, size: 320)))
-                        : _buildFallbackAvatar(name, t, size: 320),
+                            ? Image.memory(bytes, fit: BoxFit.cover, width: 206, height: 206)
+                            : Image.network(photoUrl, fit: BoxFit.cover, width: 206, height: 206, errorBuilder: (_, _, _) => _buildFallbackAvatar(name, t, size: 206, isDark: isDark)))
+                        : _buildFallbackAvatar(name, t, size: 206, isDark: isDark),
                   ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
-                // User Name & Role
+                // User Name
                 Text(
                   name,
-                  style: const TextStyle(
-                    color: SoftPalette.gray50,
-                    fontSize: 20,
+                  style: TextStyle(
+                    color: textPrimaryColor,
+                    fontSize: 21.5,
                     fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
                   ),
+                  textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: t.accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
-                  ),
-                  child: Text(
-                    role.toUpperCase(),
-                    style: TextStyle(
-                      color: t.accent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
+                const SizedBox(height: 8),
+
+                // Badges: Executive Role & Active
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                      decoration: BoxDecoration(
+                        color: surfaceCardColor,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: cardBorderColor),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.shield_outlined, size: 13, color: textPrimaryColor),
+                          const SizedBox(width: 5),
+                          Text(
+                            role.toUpperCase(),
+                            style: TextStyle(
+                              color: textPrimaryColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF064E3B) : const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF047857) : const Color(0xFF86EFAC),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6.5,
+                            height: 6.5,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF22C55E),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 5.5),
+                          Text(
+                            'Active User',
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF166534),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -4186,21 +4290,30 @@ class _UsersScreenState extends State<UsersScreen>
     );
   }
 
-  Widget _buildFallbackAvatar(String name, RoleThemeData t, {required double size}) {
+  Widget _buildFallbackAvatar(
+    String name,
+    RoleThemeData t, {
+    required double size,
+    bool isDark = true,
+  }) {
     final initials = name.trim().isNotEmpty
-        ? name.trim().split(' ').map((e) => e[0]).take(2).join().toUpperCase()
+        ? name.trim().split(RegExp(r'\s+')).take(2).map((e) => e.isNotEmpty ? e[0].toUpperCase() : '').join()
         : '?';
     return Container(
       width: size,
       height: size,
-      color: t.accentMuted,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0),
+        shape: BoxShape.circle,
+      ),
       alignment: Alignment.center,
       child: Text(
         initials,
         style: TextStyle(
-          color: t.accent,
-          fontWeight: FontWeight.w900,
-          fontSize: size * 0.35,
+          color: isDark ? Colors.white : const Color(0xFF0F172A),
+          fontWeight: FontWeight.w800,
+          fontSize: size * 0.36,
+          letterSpacing: 2,
         ),
       ),
     );

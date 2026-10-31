@@ -3334,6 +3334,7 @@ Map<String, int> _computeLocalDashboardAuxCounts({String? branchId}) {
   try {
     if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
       final box = Hive.box(LocalStorageService.attendanceBox);
+      final presentEmpKeys = <String>{};
       for (final val in box.values) {
         if (val is Map) {
           final b = (val['branchId']?.toString() ?? '').toLowerCase().trim();
@@ -3342,11 +3343,16 @@ Map<String, int> _computeLocalDashboardAuxCounts({String? branchId}) {
           if (d == todayDateKey) {
             final status = val['status']?.toString().toLowerCase();
             if (status == 'present' || status == 'late' || status == 'overtime') {
-              empPresentCount++;
+              final pin = (val['pin'] ?? val['biometricPin'])?.toString().trim() ?? '';
+              final empId = (val['employeeId'] ?? val['localId'] ?? val['id'])?.toString().trim() ?? '';
+              final name = (val['employeeName'] ?? val['name'])?.toString().trim().toLowerCase() ?? '';
+              final key = pin.isNotEmpty ? 'pin:$pin' : (empId.isNotEmpty ? 'id:$empId' : 'name:$name');
+              if (key.isNotEmpty) presentEmpKeys.add(key);
             }
           }
         }
       }
+      empPresentCount = presentEmpKeys.length;
     }
   } catch (_) {}
 
@@ -3361,11 +3367,15 @@ Map<String, int> _computeLocalDashboardAuxCounts({String? branchId}) {
 
   int madrassaPresentCount = 0;
   int madrassaYesterdayPresentCount = 0;
+  int madrassaTeacherPresentCount = 0;
+  int madrassaTeacherYesterdayPresentCount = 0;
   try {
     if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
       final yestDateKey = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 1)));
       madrassaPresentCount = MadrassaLocalStorage.getPresentStudentsCount(normB ?? 'all', todayDateKey);
       madrassaYesterdayPresentCount = MadrassaLocalStorage.getPresentStudentsCount(normB ?? 'all', yestDateKey);
+      madrassaTeacherPresentCount = MadrassaLocalStorage.getPresentTeachersCount(normB ?? 'all', todayDateKey);
+      madrassaTeacherYesterdayPresentCount = MadrassaLocalStorage.getPresentTeachersCount(normB ?? 'all', yestDateKey);
     }
   } catch (_) {}
 
@@ -3402,6 +3412,8 @@ Map<String, int> _computeLocalDashboardAuxCounts({String? branchId}) {
     'teachers': teacherPresentCount,
     'madrassa': madrassaPresentCount,
     'madrassa_yesterday': madrassaYesterdayPresentCount,
+    'madrassa_teachers': madrassaTeacherPresentCount,
+    'madrassa_teachers_yesterday': madrassaTeacherYesterdayPresentCount,
     'online': onlineUsersCount,
   };
 }
@@ -3417,6 +3429,8 @@ class SnapshotDashboardData {
   final int teacherPresentCount;
   final int madrassaPresentCount;
   final int madrassaYesterdayPresentCount;
+  final int madrassaTeacherPresentCount;
+  final int madrassaTeacherYesterdayPresentCount;
   final int onlineUsersCount;
 
   SnapshotDashboardData({
@@ -3430,6 +3444,8 @@ class SnapshotDashboardData {
     this.teacherPresentCount = 0,
     this.madrassaPresentCount = 0,
     this.madrassaYesterdayPresentCount = 0,
+    this.madrassaTeacherPresentCount = 0,
+    this.madrassaTeacherYesterdayPresentCount = 0,
     this.onlineUsersCount = 1,
   });
 }
@@ -3570,6 +3586,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
       teacherPresentCount: auxCounts['teachers'] ?? 0,
       madrassaPresentCount: auxCounts['madrassa'] ?? 0,
       madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
+      madrassaTeacherPresentCount: auxCounts['madrassa_teachers'] ?? 0,
+      madrassaTeacherYesterdayPresentCount: auxCounts['madrassa_teachers_yesterday'] ?? 0,
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   } else {
@@ -3655,6 +3673,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
       teacherPresentCount: auxCounts['teachers'] ?? 0,
       madrassaPresentCount: auxCounts['madrassa'] ?? 0,
       madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
+      madrassaTeacherPresentCount: auxCounts['madrassa_teachers'] ?? 0,
+      madrassaTeacherYesterdayPresentCount: auxCounts['madrassa_teachers_yesterday'] ?? 0,
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   }
@@ -3699,9 +3719,43 @@ class _DashboardUserKey {
   int get hashCode => uid.hashCode ^ role.hashCode ^ branchId.hashCode;
 }
 
+SnapshotDashboardData? _cachedRecentLocalSnapshot;
+DateTime? _cachedRecentLocalSnapshotAt;
+String? _cachedRecentLocalSnapshotKey;
+Future<SnapshotDashboardData>? _inFlightLocalSnapshot;
+
 Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynamic> userData) async {
   final role = (userData['role'] as String? ?? 'unknown').toLowerCase().trim();
   final String userBranchId = (userData['branchId'] as String? ?? '').toLowerCase().trim();
+  final cacheKey = '$role|$userBranchId';
+
+  final now = DateTime.now();
+  if (_cachedRecentLocalSnapshot != null &&
+      _cachedRecentLocalSnapshotKey == cacheKey &&
+      _cachedRecentLocalSnapshotAt != null &&
+      now.difference(_cachedRecentLocalSnapshotAt!).inSeconds < 5) {
+    return _cachedRecentLocalSnapshot!;
+  }
+
+  if (_inFlightLocalSnapshot != null && _cachedRecentLocalSnapshotKey == cacheKey) {
+    return await _inFlightLocalSnapshot!;
+  }
+
+  final future = _doBuildLocalSnapshotDashboardData(userData, role, userBranchId);
+  _inFlightLocalSnapshot = future;
+  _cachedRecentLocalSnapshotKey = cacheKey;
+  try {
+    final result = await future;
+    _cachedRecentLocalSnapshot = result;
+    _cachedRecentLocalSnapshotAt = DateTime.now();
+    return result;
+  } finally {
+    _inFlightLocalSnapshot = null;
+  }
+}
+
+Future<SnapshotDashboardData> _doBuildLocalSnapshotDashboardData(
+    Map<String, dynamic> userData, String role, String userBranchId) async {
 
   final isExecutiveOrGlobal = ['ceo', 'chairman', 'global user', 'global', 'global admin', 'hq manager', 'hqmanager', 'hq_manager', 'hq', 'admin', 'director', 'head office'].contains(role) ||
       role.contains('ceo') ||
@@ -3830,6 +3884,8 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
       teacherPresentCount: auxCounts['teachers'] ?? 0,
       madrassaPresentCount: auxCounts['madrassa'] ?? 0,
       madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
+      madrassaTeacherPresentCount: auxCounts['madrassa_teachers'] ?? 0,
+      madrassaTeacherYesterdayPresentCount: auxCounts['madrassa_teachers_yesterday'] ?? 0,
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   } else {
@@ -3906,6 +3962,8 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
       teacherPresentCount: auxCounts['teachers'] ?? 0,
       madrassaPresentCount: auxCounts['madrassa'] ?? 0,
       madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
+      madrassaTeacherPresentCount: auxCounts['madrassa_teachers'] ?? 0,
+      madrassaTeacherYesterdayPresentCount: auxCounts['madrassa_teachers_yesterday'] ?? 0,
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   }
@@ -4453,6 +4511,17 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           onTap: () => tryOpenModule('madrassa_attendance'),
         );
 
+        final madrassaTeachersTile = HomeStatTile(
+          label: 'Madrassa Teachers',
+          value: fmtNum(data.madrassaTeacherPresentCount),
+          icon: Icons.record_voice_over_rounded,
+          color: SoftPalette.teal500,
+          deltaPct: data.madrassaTeacherYesterdayPresentCount == 0
+              ? null
+              : (((data.madrassaTeacherPresentCount - data.madrassaTeacherYesterdayPresentCount) / data.madrassaTeacherYesterdayPresentCount) * 100),
+          onTap: () => tryOpenModule('madrassa_teachers'),
+        );
+
         final employeeAttendanceTile = HomeStatTile(
           label: 'Staff Attendance',
           value: fmtNum(data.empPresentCount),
@@ -4495,20 +4564,11 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         );
 
         final dasterkhwaanTokensTile = HomeStatTile(
-          label: 'Food Tokens',
+          label: 'Food Tokens Issued',
           value: fmtNum(today.dasterkhwaan),
           icon: Icons.room_service_rounded,
           color: SoftPalette.amber300,
           deltaPct: yesterday.dasterkhwaan == 0 ? null : ((today.dasterkhwaan - yesterday.dasterkhwaan) / yesterday.dasterkhwaan) * 100,
-          onTap: () => tryOpenModule('office_boy'),
-        );
-
-        final dasterkhwaanServedTile = HomeStatTile(
-          label: 'Food Tokens Served',
-          value: fmtNum(today.dasterkhwaanServed),
-          icon: Icons.restaurant_rounded,
-          color: SoftPalette.emerald350,
-          deltaPct: yesterday.dasterkhwaanServed == 0 ? null : ((today.dasterkhwaanServed - yesterday.dasterkhwaanServed) / yesterday.dasterkhwaanServed) * 100,
           onTap: () => tryOpenModule('office_boy'),
         );
 
@@ -4525,11 +4585,11 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           donationsTile,
           patientsTile,
           madrassaTile,
+          madrassaTeachersTile,
           employeeAttendanceTile,
           schoolStudentsTile,
           schoolTeachersTile,
           dasterkhwaanTokensTile,
-          if (today.dasterkhwaanServed > 0) dasterkhwaanServedTile,
           dasterkhwaanStockTile,
         ];
 
@@ -4777,12 +4837,6 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                                 icon: Icons.room_service_rounded,
                                 color: SoftPalette.amber300,
                                 onTap: () => tryOpenModule('office_boy'),
-                              ),
-                              HomeStatTile(
-                                label: 'Food Tokens Served',
-                                value: fmtNum(activeStats.dasterkhwaanServed),
-                                icon: Icons.restaurant_rounded,
-                                color: SoftPalette.emerald350,
                               ),
                             ];
 

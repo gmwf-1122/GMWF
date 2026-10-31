@@ -2,6 +2,7 @@
 
 import '../utils/ui_stall_monitor.dart';
 import 'busy_status.dart';
+import 'pre_login_security_service.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -1862,18 +1863,57 @@ class LocalStorageService {
 
   static Future<void> _openBoxesInBatches(Iterable<String> names) async {
     final boxNames = names.where((n) => !Hive.isBoxOpen(n) && !isBoxUnderRepair(n)).toList();
-    debugPrint('[LocalStorageService] Opening ${boxNames.length} Hive boxes in parallel batches...');
+    if (boxNames.isEmpty) return;
+    debugPrint('[LocalStorageService] Opening ${boxNames.length} Hive boxes in staggered batches...');
 
     // Tell the user what's happening (only when there's real work, so repeat calls don't flash).
-    final status = boxNames.isEmpty
-        ? null
-        : BusyStatus.begin('Loading your data', detail: 'Opening ${boxNames.length} record stores', blocking: true);
-    try {
-      if (status != null) await BusyStatus.waitForPaint();
+    final status = BusyStatus.begin(
+      'Loading your data',
+      detail: 'Opening ${boxNames.length} record stores',
+      blocking: true,
+      timeout: const Duration(seconds: 25),
+    );
 
-      const batchSize = 6;
-      for (int i = 0; i < boxNames.length; i += batchSize) {
-        final batch = boxNames.sublist(i, (i + batchSize).clamp(0, boxNames.length));
+    // Large boxes that take significant decode time:
+    const heavyBoxes = {
+      entriesBox,
+      patientsBox,
+      prescriptionsBox,
+      'local_users',
+      'local_donations',
+      dasterkhwaanTokensBox,
+    };
+
+    final heavy = boxNames.where((n) => heavyBoxes.contains(n)).toList();
+    final light = boxNames.where((n) => !heavyBoxes.contains(n)).toList();
+    final totalCount = boxNames.length;
+    var openedCount = 0;
+
+    try {
+      await BusyStatus.waitForPaint();
+
+      // 1. Heavy boxes: opened one by one with guaranteed paint before decode
+      for (final name in heavy) {
+        if (Hive.isBoxOpen(name)) {
+          openedCount++;
+          continue;
+        }
+        status.update('Loading your data', detail: 'Decoding $name store ($openedCount of $totalCount)...');
+        await BusyStatus.waitForPaint();
+        try {
+          await ensureBoxOpen(name);
+        } catch (e) {
+          debugPrint('[LocalStorageService] Error opening heavy box "$name": $e');
+        }
+        openedCount++;
+        // Yield 20 ms to the event loop so Windows message pump processes window events
+        await Future.delayed(const Duration(milliseconds: 20));
+      }
+
+      // 2. Light boxes: opened in small pairs with frame breathing
+      const batchSize = 2;
+      for (int i = 0; i < light.length; i += batchSize) {
+        final batch = light.sublist(i, (i + batchSize).clamp(0, light.length));
         await Future.wait(
           batch.map((name) async {
             try {
@@ -1883,15 +1923,15 @@ class LocalStorageService {
             }
           }),
         );
-        final done = (i + batchSize).clamp(0, boxNames.length);
-        status?.update('Loading your data', detail: 'Opened $done of ${boxNames.length} record stores');
-        // Yield to the event loop between batches so the UI stays responsive
-        if (i + batchSize < boxNames.length) {
-          await Future.delayed(const Duration(milliseconds: 4));
+        openedCount = (heavy.length + i + batchSize).clamp(0, totalCount);
+        status.update('Loading your data', detail: 'Opened $openedCount of $totalCount record stores');
+        // Yield 16 ms to keep UI smooth and responsive
+        if (i + batchSize < light.length) {
+          await Future.delayed(const Duration(milliseconds: 16));
         }
       }
     } finally {
-      status?.end();
+      status.end();
     }
   }
 
@@ -2966,7 +3006,7 @@ class LocalStorageService {
       key = 'sync_${branchIdRaw}_${type}_$docId';
     } else if (type == 'save_madrassa_log' || type == 'save_madrassa_daily_log') {
       final dt = (actionCopy['dateKey'] ?? actionCopy['date'] ?? (actionCopy['data'] is Map ? (actionCopy['data']['dateKey'] ?? actionCopy['data']['date']) : null) ?? '').toString().trim();
-      key = dt.isNotEmpty ? 'sync_${branchIdRaw}_${type}_$dt' : actionCopy['syncId'].toString();
+      key = dt.isNotEmpty ? 'sync_${branchIdRaw}_save_madrassa_log_$dt' : actionCopy['syncId'].toString();
     } else if (type == 'save_attendance_record' || type == 'save_attendance' || type == 'save_biometric_log' || type == 'save_employee_attendance') {
       final empId = (actionCopy['employeeId'] ?? (actionCopy['data'] is Map ? actionCopy['data']['employeeId'] : null) ?? entityId).toString();
       final dt = (actionCopy['date'] ?? actionCopy['dateKey'] ?? (actionCopy['data'] is Map ? (actionCopy['data']['date'] ?? actionCopy['data']['dateKey']) : null) ?? '').toString();
@@ -2984,7 +3024,12 @@ class LocalStorageService {
           .replaceAll(':', '')
           .replaceAll('-', '')
           .replaceAll('T', '_');
-      key = 'sync_att_${branchIdRaw}_${empId}_${dt}_$punchSeq';
+      // A device punch queues the employee's whole day record (it has a localKey): one queued
+      // upload per employee per day, each new punch replacing the pending copy. Keyed by punch
+      // time, every punch of the day added its own item and its own upload of the same record.
+      key = (type == 'save_attendance_record' && actionCopy['localKey'] != null && empId.isNotEmpty && dt.isNotEmpty)
+          ? 'sync_att_${branchIdRaw}_${empId}_$dt'
+          : 'sync_att_${branchIdRaw}_${empId}_${dt}_$punchSeq';
     } else if (type == 'save_biometric_device' || type == 'delete_biometric_device') {
       // [FIX] Biometric device saves must key on deviceId so every heartbeat/status
       // update overwrites the same pending entry instead of creating a new one.
@@ -3021,6 +3066,16 @@ class LocalStorageService {
           ...Map<String, dynamic>.from(actionCopy['data'] as Map),
         };
         actionCopy['type'] = 'save_entry'; // Unified single serial write
+      }
+
+      final isBothMadrassaLog = (type == 'save_madrassa_log' || type == 'save_madrassa_daily_log') &&
+          (eType == 'save_madrassa_log' || eType == 'save_madrassa_daily_log');
+      if (isBothMadrassaLog && existingMap['data'] is Map && actionCopy['data'] is Map) {
+        actionCopy['data'] = {
+          ...Map<String, dynamic>.from(existingMap['data'] as Map),
+          ...Map<String, dynamic>.from(actionCopy['data'] as Map),
+        };
+        actionCopy['type'] = 'save_madrassa_log';
       }
     }
 
@@ -4350,12 +4405,20 @@ class LocalStorageService {
         sanitized['usernameLower'] = usernameLower;
 
         // Display Name
+        // Never store a stand-in: "Staff User" written here became the user's name on every
+        // screen and outranked the real name arriving later. Records it was written into are
+        // repaired from the username/email.
         String name = (sanitized['name'] ?? sanitized['displayName'] ?? '').toString().trim();
-        if (name.isEmpty) {
-          name = username.isNotEmpty ? username : (email.isNotEmpty ? email.split('@').first : 'Staff User');
+        if (name.isEmpty || name == 'Staff User') {
+          name = username.isNotEmpty ? username : (email.isNotEmpty ? email.split('@').first : '');
         }
-        sanitized['name'] = name;
-        sanitized['displayName'] = name;
+        if (name.isNotEmpty) {
+          sanitized['name'] = name;
+          sanitized['displayName'] = name;
+        } else {
+          sanitized.remove('name');
+          sanitized.remove('displayName');
+        }
 
         // Role Resolution
         String role = (sanitized['role'] ?? sanitized['userRole'] ?? '').toString().trim();
@@ -6632,7 +6695,7 @@ class LocalStorageService {
   /// the box; while tokens arrive over the LAN that is several full scans a second on the UI
   /// thread, which on Windows is also the window's thread ("Not Responding"). The index is
   /// built once and then updated one key at a time from the box's change events.
-  static final Map<String, SplayTreeMap<dynamic, _BranchEntry>> _branchEntries = {};
+  static final Map<String, Map<dynamic, _BranchEntry>> _branchEntries = {};
   static final Map<String, DateTime> _branchEntriesBuiltAt = {};
 
   /// Rebuilt now and then anyway, in case branch/camp settings changed since it was built.
@@ -6674,7 +6737,7 @@ class LocalStorageService {
     return isKarachi;
   }
 
-  static SplayTreeMap<dynamic, _BranchEntry> _branchEntriesFor(Box box, String normBranch) {
+  static Map<dynamic, _BranchEntry> _branchEntriesFor(Box box, String normBranch) {
     final index = _branchEntries[normBranch];
     final builtAt = _branchEntriesBuiltAt[normBranch];
     if (index != null && builtAt != null && DateTime.now().difference(builtAt) < _branchEntriesMaxAge) {
@@ -6682,9 +6745,11 @@ class LocalStorageService {
     }
     UiStallMonitor.mark('entries index: $normBranch');
     final isKarachi = CampSessionService.isKarachiFamily(normBranch);
-    final fresh = SplayTreeMap<dynamic, _BranchEntry>(_hiveKeyOrder);
-    for (final k in box.keys) {
-      final val = box.get(k);
+    final fresh = <dynamic, _BranchEntry>{};
+    final map = box.toMap();
+    final keys = map.keys.toList()..sort(_hiveKeyOrder);
+    for (final k in keys) {
+      final val = map[k];
       if (val is! Map) continue;
       if (!_entryInBranch(k.toString().toLowerCase().trim(), val, normBranch, isKarachi)) continue;
       fresh[k] = _BranchEntry.of(val, normBranch);
@@ -7896,6 +7961,19 @@ class LocalStorageService {
   // PRESCRIPTIONS
   // ════════════════════════════════════════════════════════════════════════════
 
+  /// Whether [incoming] is an older version of the prescription [existing] (by the doctor's
+  /// updatedAt / completedAt). False when either has no time or they are for different tokens.
+  static bool isOlderPrescription(Map? incoming, Object? existing) {
+    if (incoming == null || existing is! Map || existing.isEmpty) return false;
+    final inSerial = (incoming['serial'] ?? incoming['id'] ?? '').toString().trim().toUpperCase();
+    final exSerial = (existing['serial'] ?? existing['id'] ?? '').toString().trim().toUpperCase();
+    if (inSerial.isNotEmpty && exSerial.isNotEmpty && inSerial != exSerial) return false;
+    DateTime? at(Map m) => DateTime.tryParse((m['updatedAt'] ?? m['completedAt'] ?? '').toString());
+    final inAt = at(incoming);
+    final exAt = at(existing);
+    return inAt != null && exAt != null && inAt.isBefore(exAt);
+  }
+
   static Future<void> saveLocalPrescription(
       Map<String, dynamic> prescription) async {
     final serialRaw =
@@ -8018,10 +8096,14 @@ class LocalStorageService {
 
     for (final k in matchingKeys) {
       final existing = entriesBoxRef.get(k);
+      // A replayed (LAN catch-up) snapshot older than what the entry holds would put the
+      // doctor's earlier medicines - or none - back on the dispenser's screen.
+      if (existing is Map && isOlderPrescription(sanitized, existing['prescription'])) continue;
       final updatedEntry = existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
 
-      updatedEntry['serial'] = serial;
-      updatedEntry['id'] = serial;
+      // Entries keep the upper-case serial (saveEntryLocal); the doctor sends it lower-cased.
+      updatedEntry['serial'] = normSerialUpper;
+      updatedEntry['id'] = normSerialUpper;
       if (branchId.isNotEmpty) updatedEntry['branchId'] = branchId;
       if (sanitized['dateKey'] != null) updatedEntry['dateKey'] = sanitized['dateKey'];
       if (sanitized['queueType'] != null) updatedEntry['queueType'] = sanitized['queueType'];
@@ -8041,7 +8123,7 @@ class LocalStorageService {
         updatedEntry['cnic'] = cleanCnic;
       }
 
-      updatedEntry['prescription'] = sanitized;
+      updatedEntry['prescription'] = prescriptionForEmbedding(sanitized);
       updatedEntry['status']       = 'completed';
       updatedEntry['completedAt']  ??= sanitized['completedAt'] ?? DateTime.now().toIso8601String();
       if (pMeds != null) {
@@ -11077,10 +11159,36 @@ class LocalStorageService {
     return b.substring(0, 3);
   }
 
-  static Future<String> nextReceiptNumber([String branchId = '']) async {
+  static Future<void>? _receiptChain;
+
+  /// Receipt numbers are per-PC counters, so two PCs issue the same sequence; the
+  /// terminal suffix tells them apart. Calls are serialised: the counter is read
+  /// and then written with an await between, so two quick saves got one number.
+  static Future<String> nextReceiptNumber([String branchId = '']) {
+    final run = (_receiptChain ?? Future<void>.value()).then((_) => _nextReceiptNumberLocked(branchId));
+    _receiptChain = run.then((_) {}, onError: (_) {});
+    return run;
+  }
+
+  static Future<String> _nextReceiptNumberLocked(String branchId) async {
     final box = Hive.box('app_settings');
     final code = getBranchCode(branchId);
-    
+
+    // terminal_id is only 2 digits (random, or typed in Settings), so PCs clashed.
+    // A stable 2-character code from this install's device id is appended to it.
+    final suffix = box.get('terminal_suffix')?.toString() ?? '';
+    if (suffix.isEmpty) {
+      String dev = 'dev_unknown';
+      try { dev = await PreLoginSecurityService.getDeviceId(); } catch (_) {}
+      if (dev == 'dev_unknown') dev = '${DateTime.now().microsecondsSinceEpoch}';
+      var h = 0;
+      for (final c in dev.codeUnits) {
+        h = (h * 31 + c) & 0x7fffffff;
+      }
+      final s = h.toRadixString(36).toUpperCase().padLeft(2, '0');
+      await box.put('terminal_suffix', s.substring(s.length - 2));
+    }
+
     final key = 'receipt_seq_$code';
     final current = box.get(key, defaultValue: 0) as int;
     final next = current + 1;
@@ -11099,6 +11207,7 @@ class LocalStorageService {
     String? dispensaryId,
     String? session,
     bool increment = false,
+    int atLeast = 0,
   }) async {
     // Normalize branchId before it's used to build/read Hive keys.
     branchId = branchId.toLowerCase().trim();
@@ -11109,6 +11218,12 @@ class LocalStorageService {
     final cleanDateKey = dateKey.replaceAll(RegExp(r'[^0-9]'), '');
     final counterKey = 'counter_${branchId}_${cleanDateKey}_${sessionLetter}_$dispTag';
     final savedSeq = (counterBox.get(counterKey) as num?)?.toInt() ?? 0;
+
+    // Fast-path for estimation display in UI (!increment) when sequence is already known
+    if (!increment && savedSeq > 0) {
+      final nextSeq = savedSeq + 1 > atLeast ? savedSeq + 1 : atLeast;
+      return nextSeq;
+    }
 
     final entries = getLocalEntries(branchId, dispensaryId: activeCamp, filterByCamp: true)
         .where((m) {
@@ -11132,7 +11247,8 @@ class LocalStorageService {
       }
     }
 
-    final nextSeq = maxSeq + 1;
+    // [atLeast]: a number the LAN server issued, so this desk's own count continues after it.
+    final nextSeq = maxSeq + 1 > atLeast ? maxSeq + 1 : atLeast;
     if (increment) {
       await counterBox.put(counterKey, nextSeq);
     }
@@ -11141,8 +11257,9 @@ class LocalStorageService {
 
   static String formatReceiptNumber(int seq, [String branchCode = '']) {
     final padded = seq.toString().padLeft(3, '0');
-    final tid = Hive.box('app_settings').get('terminal_id', defaultValue: '');
-    
+    final settings = Hive.box('app_settings');
+    final tid = '${settings.get('terminal_id', defaultValue: '') ?? ''}${settings.get('terminal_suffix', defaultValue: '') ?? ''}';
+
     String res = 'GMWF';
     if (branchCode.isNotEmpty) res += '-$branchCode';
     res += '-$padded';

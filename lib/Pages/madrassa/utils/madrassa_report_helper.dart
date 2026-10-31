@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
@@ -1700,6 +1701,12 @@ class MadrassaReportHelper {
 
   static Future<void> _saveAndNotify(String fileName, Uint8List bytes) async {
     try {
+      // Web has no Downloads directory (getDownloadsDirectory throws, and the
+      // catch below only recovers PDFs); let the browser download the file.
+      if (kIsWeb) {
+        await FilePicker.platform.saveFile(fileName: fileName, bytes: bytes);
+        return;
+      }
       String? finalFilePath;
       final bool isMobile = !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 

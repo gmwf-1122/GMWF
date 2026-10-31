@@ -4493,6 +4493,9 @@ class ServerSyncManager {
 
   // ── Non-persistence / heartbeat event types that must NOT be queued ─────────
   static const Set<String> _ignoredEventTypes = {
+    // Desk-to-desk "I'm dispensing this token" notices: live only, never stored or uploaded.
+    'dispense_claim',
+    'dispense_release',
     'activity',
     'status_update',
     'client_activity',
@@ -6194,7 +6197,7 @@ class ServerSyncManager {
             : (parts.isNotEmpty ? parts[0] : '');
         final dateKey   = data['dateKey']?.toString() ??
             (serial.contains('-') ? cleanDateKey : _todayKey());
-        final bId       = (data['branchId'] as String?)?.trim() ?? branchId;
+        final bId       = LocalStorageService.sanitizeBranchId((data['branchId'] as String?)?.trim() ?? branchId);
 
         if (serial.isNotEmpty && dateKey.isNotEmpty) {
           final serialStatusKey = 'sync_dispense_${bId}_${serial}_status';
@@ -6283,9 +6286,9 @@ class ServerSyncManager {
 
         final rawDelta = data['_quantityDelta'];
         final medicineId = (data['id'] ?? data['medicineId'] ?? data['docId'])?.toString().trim();
-        final bId = (message['branchId'] as String?)?.trim().isNotEmpty == true
-            ? message['branchId'] as String
-            : branchId;
+        final rawB = (message['branchId'] as String?)?.trim();
+        final bId = LocalStorageService.sanitizeBranchId(
+            (rawB != null && rawB.isNotEmpty) ? rawB : branchId);
 
         if (medicineId != null && medicineId.isNotEmpty) {
           if (rawDelta != null) {
@@ -6341,9 +6344,8 @@ class ServerSyncManager {
               (message['data'] is Map ? message['data']['branchId'] : null))
           ?.toString()
           .trim();
-      final bId = (clientBranchId != null && clientBranchId.isNotEmpty)
-          ? clientBranchId
-          : branchId;
+      final bId = LocalStorageService.sanitizeBranchId(
+          (clientBranchId != null && clientBranchId.isNotEmpty) ? clientBranchId : branchId);
 
       final rawSerial = (message['serial'] ?? (message['data'] is Map ? (message['data']['serial'] ?? message['data']['id']) : null))?.toString().trim().toUpperCase();
       final entryUid = (message['entryUid'] ?? (message['data'] is Map ? message['data']['entryUid'] : null))?.toString().trim();
@@ -7092,23 +7094,21 @@ class ServerSyncManager {
         return false;
       }
 
-      final resolvedBranchId =
-          (syncItem['branchId'] as String?)?.trim().isNotEmpty == true
-              ? syncItem['branchId'] as String
-              : branchId;
+      final rawBranch = (syncItem['branchId'] as String?)?.trim().isNotEmpty == true
+          ? (syncItem['branchId'] as String).trim()
+          : (data is Map ? (data['branchId'] as String?)?.trim() : null);
+      final resolvedBranchId = LocalStorageService.sanitizeBranchId(
+          (rawBranch != null && rawBranch.isNotEmpty) ? rawBranch : branchId);
 
       String resolvedSerial = (syncItem['serial'] as String?)?.trim().toUpperCase() ??
-          (data is Map ? (data['serial'] ?? data['id'])?.toString().trim().toUpperCase() ?? '' : '');
+          (data is Map ? (data['serial'] ?? data['tokenSerial'] ?? data['tokenNumber'] ?? data['id'])?.toString().trim().toUpperCase() ?? '' : '');
 
       String resolvedDateKey = (syncItem['dateKey'] as String?)?.trim() ??
           (data is Map ? data['dateKey']?.toString().trim() ?? '' : '');
 
-      // Resilient fallback for missing dateKey: derive from serial
-      if (resolvedDateKey.isEmpty && resolvedSerial.contains('-')) {
-        final parts = resolvedSerial.split('-');
-        resolvedDateKey = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
-            ? (parts.length > 1 ? parts[1] : '')
-            : (parts.isNotEmpty ? parts[0] : '');
+      // Resilient fallback for missing dateKey: derive canonical 6-digit dateKey from serial
+      if (resolvedDateKey.isEmpty && resolvedSerial.isNotEmpty) {
+        resolvedDateKey = CampSessionService.getDateKeyFromSerial(resolvedSerial);
       }
       if (resolvedDateKey.isEmpty) {
         resolvedDateKey = _todayKey();
@@ -7236,7 +7236,8 @@ class ServerSyncManager {
     final rawSerial         = serial.isNotEmpty ? serial : (cleanData['serial'] as String? ?? '');
     final effectiveSerial   = rawSerial.trim().toUpperCase();
     final effectiveQueueType = queueType;
-    final effectiveBranchId = branchId.isNotEmpty ? branchId : this.branchId;
+    final effectiveBranchId = LocalStorageService.sanitizeBranchId(
+        branchId.isNotEmpty ? branchId : this.branchId);
 
     switch (type) {
       // ── Token entry ──────────────────────────────────────────────────────
@@ -7516,7 +7517,9 @@ class ServerSyncManager {
       case 'update_serial_status':
         final s  = effectiveSerial;
         final dk = effectiveDateKey;
-        final qt = effectiveQueueType;
+        final qt = _validQueueTypes.contains(effectiveQueueType)
+            ? effectiveQueueType
+            : _resolveQueueType(cleanData['queueType']);
         if (s.isEmpty) throw Exception('update_serial_status: missing serial');
 
         final statusPatch = {

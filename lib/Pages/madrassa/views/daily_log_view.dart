@@ -107,11 +107,29 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
   }
 
   // Initialise streams/downloads for the selected date
+  // Runs on every date tap; without a throttle each tap re-read the whole
+  // students collection (~150+ reads) and the same month's logs again.
+  static final Map<String, DateTime> _lastDownloadAt = {};
+
+  static bool _downloadDue(String key, Duration every) {
+    final last = _lastDownloadAt[key];
+    if (last != null && DateTime.now().difference(last) < every) return false;
+    _lastDownloadAt[key] = DateTime.now();
+    return true;
+  }
+
   void _updateDateStreams() {
-    MadrassaLocalStorage.downloadStudents(_effectiveBranch);
-    MadrassaLocalStorage.downloadLogsForMonth(
-        _effectiveBranch, _selectedDate.year, _selectedDate.month);
-    MadrassaLocalStorage.downloadHolidays(_effectiveBranch);
+    final b = _effectiveBranch;
+    if (_downloadDue('students|$b', const Duration(minutes: 10))) {
+      MadrassaLocalStorage.downloadStudents(b);
+    }
+    final y = _selectedDate.year, m = _selectedDate.month;
+    if (_downloadDue('logs|$b|$y-$m', const Duration(minutes: 2))) {
+      MadrassaLocalStorage.downloadLogsForMonth(b, y, m);
+    }
+    if (_downloadDue('holidays|$b', const Duration(minutes: 30))) {
+      MadrassaLocalStorage.downloadHolidays(b);
+    }
   }
 
   bool _isFutureDate(DateTime date) {
@@ -282,11 +300,12 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
             cached['qaidaCompleted'] = true;
             cached['qaidaSabak'] = 'completed';
             await MadrassaLocalStorage.cacheStudent(_effectiveBranch, sId, cached);
+            final compacted = MadrassaLocalStorage.compactMediaForCloud(Map<String, dynamic>.from(cached));
             await LocalStorageService.enqueueSync({
               'type': 'save_madrassa_student',
               'branchId': _effectiveBranch,
               'studentId': sId,
-              'data': cached,
+              'data': compacted,
             });
           }
         } else if (data['qaidaCompleted'] == false || (data.containsKey('qaidaSabak') && data['qaidaSabak'] != 'completed' && data['qaidaSabak'] != null && data['qaidaSabak'] != '-')) {
@@ -295,11 +314,12 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
             cached['qaidaCompleted'] = false;
             cached['qaidaSabak'] = data['qaidaSabak'] ?? '21';
             await MadrassaLocalStorage.cacheStudent(_effectiveBranch, sId, cached);
+            final compacted = MadrassaLocalStorage.compactMediaForCloud(Map<String, dynamic>.from(cached));
             await LocalStorageService.enqueueSync({
               'type': 'save_madrassa_student',
               'branchId': _effectiveBranch,
               'studentId': sId,
-              'data': cached,
+              'data': compacted,
             });
           }
         }
@@ -401,8 +421,14 @@ _changeNotifier.value++;
     _updateLocalSilent(sId, 'attendance', value);
     if (value == 'leave') {
       _updateLocalSilent(sId, 'uniform', 'leave');
+      _updateLocalSilent(sId, 'isLate', false);
+      _updateLocalSilent(sId, 'timing', 'on_time');
+      _updateLocalSilent(sId, 'arrivalTime', null);
     } else if (value == 'absent') {
       _updateLocalSilent(sId, 'uniform', false);
+      _updateLocalSilent(sId, 'isLate', false);
+      _updateLocalSilent(sId, 'timing', 'on_time');
+      _updateLocalSilent(sId, 'arrivalTime', null);
     }
   }
 
@@ -1714,13 +1740,16 @@ _changeNotifier.value++;
     final isDesktop = GBreakpoint.isDesktop(context);
     final isMobile = GBreakpoint.isMobile(context);
     final isReadOnly = !_canSaveData();
-    int present = 0, leave = 0, absent = 0, replied = 0;
+    int present = 0, leave = 0, absent = 0, replied = 0, lateCount = 0;
     for (var s in students) {
       final sId = s['id'] ?? '';
       final log = _localChanges[sId] ?? _safeMap(logData[sId]);
       final att = log['attendance'] ?? 'absent';
       if (att == 'present') {
         present++;
+        if (log['isLate'] == true || log['timing'] == 'late') {
+          lateCount++;
+        }
       } else if (att == 'leave') {
         leave++;
       } else {
@@ -1753,6 +1782,8 @@ _changeNotifier.value++;
             runSpacing: 6,
             children: [
               _statText('${context.l.present}: $present', context.adapt(SoftPalette.green400)),
+              if (lateCount > 0)
+                _statText('${context.l.late}: $lateCount', context.adapt(SoftPalette.amber400)),
               _statText('${context.l.leave}: $leave', context.adapt(SoftPalette.amber300)),
               _statText('${context.l.absent}: $absent', context.adapt(SoftPalette.red500)),
               _statText(context.isUrdu ? 'جوابات: $replied' : 'Replied: $replied', context.adapt(SoftPalette.amber300)),
@@ -1770,6 +1801,10 @@ _changeNotifier.value++;
             ),
           ),
           _statText('${context.l.present}: $present', context.adapt(SoftPalette.green400)),
+          if (lateCount > 0) ...[
+            const SizedBox(width: 12),
+            _statText('${context.l.late}: $lateCount', context.adapt(SoftPalette.amber400)),
+          ],
           const SizedBox(width: 12),
           _statText('${context.l.leave}: $leave', context.adapt(SoftPalette.amber300)),
           const SizedBox(width: 12),
@@ -2302,8 +2337,20 @@ _changeNotifier.value++;
     String attTextEn = 'Absent';
     String attTextUr = 'غیر حاضر';
     if (att == 'present') {
-      attTextEn = 'Present';
-      attTextUr = 'حاضر';
+      final isLate = currentLog['isLate'] == true || currentLog['timing'] == 'late';
+      final arrivalTime = currentLog['arrivalTime']?.toString();
+      if (isLate) {
+        if (arrivalTime != null && arrivalTime.isNotEmpty) {
+          attTextEn = 'Present (Late - $arrivalTime)';
+          attTextUr = 'حاضر (دیر سے آمد - $arrivalTime)';
+        } else {
+          attTextEn = 'Present (Late)';
+          attTextUr = 'حاضر (دیر سے آمد)';
+        }
+      } else {
+        attTextEn = 'Present (On Time)';
+        attTextUr = 'حاضر (بروقت)';
+      }
     } else if (att == 'leave') {
       attTextEn = 'On Leave';
       attTextUr = 'رخصت';
@@ -2434,7 +2481,15 @@ _changeNotifier.value++;
       String attText = 'Absent / غیر حاضر';
       if (att == 'present') {
         present++;
-        attText = 'Present / حاضر';
+        final isLate = log['isLate'] == true || log['timing'] == 'late';
+        final arrivalTime = log['arrivalTime']?.toString();
+        if (isLate) {
+          attText = (arrivalTime != null && arrivalTime.isNotEmpty)
+              ? 'Present (Late - $arrivalTime) / حاضر (دیر سے آمد - $arrivalTime)'
+              : 'Present (Late) / حاضر (دیر سے آمد)';
+        } else {
+          attText = 'Present (On Time) / حاضر (بروقت)';
+        }
       } else if (att == 'leave') {
         leave++;
         attText = 'On Leave / رخصت';
@@ -2825,6 +2880,233 @@ class SegmentedAttendanceToggle extends StatelessWidget {
   }
 }
 
+class SegmentedTimingToggle extends StatelessWidget {
+  final bool isLate;
+  final String? arrivalTime;
+  final bool isEnabled;
+  final ValueChanged<bool>? onChanged;
+  final VoidCallback? onPickTime;
+  final bool showLabel;
+  final bool isCompact;
+
+  const SegmentedTimingToggle({
+    super.key,
+    required this.isLate,
+    this.arrivalTime,
+    this.isEnabled = true,
+    this.onChanged,
+    this.onPickTime,
+    this.showLabel = true,
+    this.isCompact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isUrdu = context.isUrdu;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final height = isCompact ? 30.0 : 36.0;
+    final borderRadius = BorderRadius.circular(height / 2);
+    final itemPadding = isCompact
+        ? const EdgeInsets.symmetric(horizontal: 8, vertical: 2)
+        : const EdgeInsets.symmetric(horizontal: 10, vertical: 4);
+    final fontSize = isCompact ? 10.5 : 11.5;
+    final iconSize = isCompact ? 11.0 : 13.0;
+
+    Widget toggle = Tooltip(
+      message: isEnabled
+          ? ''
+          : (isUrdu ? 'صرف حاضر طلباء کے لیے دستیاب ہے' : 'Only available when student is marked Present'),
+      child: Opacity(
+        opacity: isEnabled ? 1.0 : 0.42,
+        child: Container(
+          height: height,
+          decoration: BoxDecoration(
+            color: context.adapt(SoftPalette.slate100),
+            borderRadius: borderRadius,
+            border: Border.all(
+              color: isDark ? SoftPalette.slate700 : SoftPalette.slate200,
+              width: 0.8,
+            ),
+          ),
+          padding: const EdgeInsets.all(2.5),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildSegment(
+                context: context,
+                label: context.l.onTime,
+                icon: Icons.check_circle_outline_rounded,
+                isSelected: !isLate,
+                activeColor: SoftPalette.emerald350,
+                isEnabled: isEnabled,
+                padding: itemPadding,
+                fontSize: fontSize,
+                iconSize: iconSize,
+                borderRadius: borderRadius,
+                onTap: (isEnabled && onChanged != null) ? () => onChanged!(false) : null,
+              ),
+              const SizedBox(width: 3),
+              _buildSegment(
+                context: context,
+                label: context.l.late,
+                icon: Icons.access_time_rounded,
+                isSelected: isLate,
+                activeColor: SoftPalette.amber400,
+                isEnabled: isEnabled,
+                padding: itemPadding,
+                fontSize: fontSize,
+                iconSize: iconSize,
+                borderRadius: borderRadius,
+                onTap: (isEnabled && onChanged != null) ? () => onChanged!(true) : null,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final bool hasTime = isLate && arrivalTime != null && arrivalTime!.isNotEmpty;
+
+    Widget timeChip = Tooltip(
+      message: isUrdu ? 'آمد کا وقت تبدیل کریں' : 'Click to change arrival time',
+      child: InkWell(
+        onTap: isEnabled ? onPickTime : null,
+        borderRadius: borderRadius,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          height: height,
+          padding: isCompact
+              ? const EdgeInsets.symmetric(horizontal: 7, vertical: 2)
+              : const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+          decoration: BoxDecoration(
+            color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.12),
+            borderRadius: borderRadius,
+            border: Border.all(
+              color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.6),
+              width: 0.8,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.access_time_filled_rounded, size: iconSize, color: context.adapt(SoftPalette.amber400)),
+              const SizedBox(width: 4),
+              Text(
+                arrivalTime ?? '',
+                style: TextStyle(
+                  fontSize: fontSize,
+                  fontWeight: FontWeight.bold,
+                  color: context.adapt(SoftPalette.amber400),
+                ),
+              ),
+              if (onPickTime != null && isEnabled) ...[
+                const SizedBox(width: 3),
+                Icon(Icons.edit_rounded, size: iconSize - 1, color: context.adapt(SoftPalette.amber400)),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+
+    Widget toggleWithTime = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        toggle,
+        if (hasTime && showLabel) ...[
+          const SizedBox(width: 6),
+          timeChip,
+        ],
+      ],
+    );
+
+    if (showLabel) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            context.l.timing,
+            style: context.urduStyle(
+              style: TextStyle(
+                fontSize: 10,
+                color: context.adapt(SoftPalette.slate400),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(height: 2),
+          toggleWithTime,
+        ],
+      );
+    }
+
+    return toggle;
+  }
+
+  Widget _buildSegment({
+    required BuildContext context,
+    required String label,
+    required IconData icon,
+    required bool isSelected,
+    required Color activeColor,
+    required bool isEnabled,
+    required EdgeInsets padding,
+    required double fontSize,
+    required double iconSize,
+    required BorderRadius borderRadius,
+    required VoidCallback? onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeInOut,
+        padding: padding,
+        decoration: BoxDecoration(
+          color: isSelected ? activeColor : Colors.transparent,
+          borderRadius: borderRadius,
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: activeColor.withValues(alpha: 0.3),
+                    blurRadius: 4,
+                    offset: const Offset(0, 1),
+                  )
+                ]
+              : null,
+        ),
+        alignment: Alignment.center,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: iconSize,
+              color: isSelected
+                  ? SoftPalette.gray50
+                  : context.adapt(SoftPalette.slate550),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: context.urduStyle(
+                style: TextStyle(
+                  color: isSelected ? SoftPalette.gray50 : context.adapt(SoftPalette.slate550),
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                  fontSize: fontSize,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _StudentLogCard extends StatelessWidget {
   final Map<String, dynamic> student;
   final ValueNotifier<Map<String, dynamic>> logNotifier;
@@ -2860,6 +3142,44 @@ class _StudentLogCard extends StatelessWidget {
     required this.buildParaDropdown,
     required this.buildRatioDropdown,
   });
+
+  Future<void> _selectArrivalTime(BuildContext context, String sId, String? currentArrivalTime) async {
+    final initial = _parseTimeOfDay(currentArrivalTime);
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: initial,
+      helpText: context.isUrdu ? 'طالب علم کی آمد کا وقت' : 'Student Arrival Time',
+      cancelText: context.isUrdu ? 'منسوخ' : 'Cancel',
+      confirmText: context.isUrdu ? 'محفوظ کریں' : 'Set Time',
+    );
+    if (picked != null) {
+      final now = DateTime.now();
+      final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+      final formatted = DateFormat('hh:mm a').format(dt);
+      onUpdateLocal(sId, 'arrivalTime', formatted);
+      onUpdateLocal(sId, 'isLate', true);
+      onUpdateLocal(sId, 'timing', 'late');
+    }
+  }
+
+  static TimeOfDay _parseTimeOfDay(String? timeStr) {
+    if (timeStr == null || timeStr.trim().isEmpty) return TimeOfDay.now();
+    try {
+      final dt = DateFormat('hh:mm a').parse(timeStr.trim());
+      return TimeOfDay(hour: dt.hour, minute: dt.minute);
+    } catch (_) {
+      try {
+        final parts = timeStr.trim().split(':');
+        if (parts.length >= 2) {
+          final h = int.tryParse(parts[0]) ?? 12;
+          final m = int.tryParse(parts[1].split(' ')[0]) ?? 0;
+          final isPm = timeStr.toLowerCase().contains('pm');
+          return TimeOfDay(hour: isPm && h < 12 ? h + 12 : h, minute: m);
+        }
+      } catch (_) {}
+      return TimeOfDay.now();
+    }
+  }
 
   Widget _actionButton(String label, Color color, VoidCallback onTap) {
     return ElevatedButton(
@@ -3549,6 +3869,8 @@ class _StudentLogCard extends StatelessWidget {
         final att = log['attendance'] ?? 'absent';
         final uni = log['uniform'] ?? false;
         final msg = log['parentReplied'] ?? false;
+        final isLate = log['isLate'] == true || log['timing'] == 'late';
+        final arrivalTime = log['arrivalTime']?.toString();
         final leaveStatus = log['leaveStatus'] ?? 'pending';
         final isParentRequested = log['isParentRequested'] == true ||
             att == 'leave_requested' ||
@@ -3793,6 +4115,39 @@ class _StudentLogCard extends StatelessWidget {
               ),
             ),
           if (hifzBadge != null && !isStudentNazra) hifzBadge,
+          if (att == 'present' && isLate)
+            Tooltip(
+              message: context.isUrdu ? 'آمد کا وقت تبدیل کریں' : 'Click to change arrival time',
+              child: InkWell(
+                onTap: isReadOnly ? null : () => _selectArrivalTime(context, sId, arrivalTime),
+                borderRadius: BorderRadius.circular(4),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.5), width: 0.8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.access_time_filled_rounded, size: 9, color: context.adapt(SoftPalette.amber400)),
+                      const SizedBox(width: 2.5),
+                      Text(
+                        (arrivalTime != null && arrivalTime.isNotEmpty)
+                            ? (context.isUrdu ? 'تاخیر ($arrivalTime)' : 'Late ($arrivalTime)')
+                            : (context.isUrdu ? 'تاخیر' : 'Late'),
+                        style: TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                          color: context.adapt(SoftPalette.amber400),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ];
 
         Widget genderSessionBadges = Wrap(
@@ -3898,11 +4253,17 @@ class _StudentLogCard extends StatelessWidget {
                         onUpdateLocal(sId, 'attendance', 'leave');
                         onUpdateLocal(sId, 'leaveStatus', 'approved');
                         onUpdateLocal(sId, 'uniform', 'leave');
+                        onUpdateLocal(sId, 'isLate', false);
+                        onUpdateLocal(sId, 'timing', 'on_time');
+                        onUpdateLocal(sId, 'arrivalTime', null);
                       }),
                       const SizedBox(width: 6),
                       _actionButton(context.isUrdu ? 'مسترد' : 'Deny', SoftPalette.red400, () {
                         onUpdateLocal(sId, 'attendance', 'absent');
                         onUpdateLocal(sId, 'leaveStatus', 'denied');
+                        onUpdateLocal(sId, 'isLate', false);
+                        onUpdateLocal(sId, 'timing', 'on_time');
+                        onUpdateLocal(sId, 'arrivalTime', null);
                       }),
                     ],
                   ),
@@ -3917,8 +4278,14 @@ class _StudentLogCard extends StatelessWidget {
                   onUpdateLocal(sId, 'attendance', newAtt);
                   if (newAtt == 'leave') {
                     onUpdateLocal(sId, 'uniform', 'leave');
+                    onUpdateLocal(sId, 'isLate', false);
+                    onUpdateLocal(sId, 'timing', 'on_time');
+                    onUpdateLocal(sId, 'arrivalTime', null);
                   } else if (newAtt == 'absent') {
                     onUpdateLocal(sId, 'uniform', false);
+                    onUpdateLocal(sId, 'isLate', false);
+                    onUpdateLocal(sId, 'timing', 'on_time');
+                    onUpdateLocal(sId, 'arrivalTime', null);
                   }
                 },
                 showLabel: false,
@@ -4174,15 +4541,21 @@ class _StudentLogCard extends StatelessWidget {
                     onUpdateLocal(sId, 'attendance', 'leave');
                     onUpdateLocal(sId, 'leaveStatus', 'approved');
                     onUpdateLocal(sId, 'uniform', 'leave');
+                    onUpdateLocal(sId, 'isLate', false);
+                    onUpdateLocal(sId, 'timing', 'on_time');
+                    onUpdateLocal(sId, 'arrivalTime', null);
                   }),
                   const SizedBox(width: 8),
                   _actionButton('Deny', SoftPalette.red400, isReadOnly ? () {} : () {
                     onUpdateLocal(sId, 'attendance', 'absent');
                     onUpdateLocal(sId, 'leaveStatus', 'denied');
+                    onUpdateLocal(sId, 'isLate', false);
+                    onUpdateLocal(sId, 'timing', 'on_time');
+                    onUpdateLocal(sId, 'arrivalTime', null);
                   }),
                 ],
               )
-            else
+            else ...[
               SegmentedAttendanceToggle(
                 value: att,
                 allowStudentLeave: allowStudentLeave,
@@ -4191,20 +4564,48 @@ class _StudentLogCard extends StatelessWidget {
                   onUpdateLocal(sId, 'attendance', newAtt);
                   if (newAtt == 'leave') {
                     onUpdateLocal(sId, 'uniform', 'leave');
+                    onUpdateLocal(sId, 'isLate', false);
+                    onUpdateLocal(sId, 'timing', 'on_time');
+                    onUpdateLocal(sId, 'arrivalTime', null);
                   } else if (newAtt == 'absent') {
                     onUpdateLocal(sId, 'uniform', false);
+                    onUpdateLocal(sId, 'isLate', false);
+                    onUpdateLocal(sId, 'timing', 'on_time');
+                    onUpdateLocal(sId, 'arrivalTime', null);
                   }
                 },
                 showLabel: true,
               ),
-            const SizedBox(width: 24),
+              const SizedBox(width: 14),
+              SegmentedTimingToggle(
+                isLate: isLate,
+                arrivalTime: arrivalTime,
+                isEnabled: att == 'present' && !isReadOnly,
+                showLabel: true,
+                onChanged: (val) {
+                  onUpdateLocal(sId, 'isLate', val);
+                  onUpdateLocal(sId, 'timing', val ? 'late' : 'on_time');
+                  if (val) {
+                    final existingTime = log['arrivalTime']?.toString();
+                    if (existingTime == null || existingTime.isEmpty) {
+                      final nowTime = DateFormat('hh:mm a').format(DateTime.now());
+                      onUpdateLocal(sId, 'arrivalTime', nowTime);
+                    }
+                  } else {
+                    onUpdateLocal(sId, 'arrivalTime', null);
+                  }
+                },
+                onPickTime: isReadOnly ? null : () => _selectArrivalTime(context, sId, arrivalTime),
+              ),
+            ],
+            const SizedBox(width: 18),
             _switchCol(
               context,
               context.l.uniform,
               (att == 'leave' || uni == true || uni == 'leave'),
               (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
             ),
-            const SizedBox(width: 24),
+            const SizedBox(width: 18),
             _switchCol(
               context,
               context.l.parentReplied,
@@ -4213,7 +4614,7 @@ class _StudentLogCard extends StatelessWidget {
               activeColor: SoftPalette.amber300,
               trackColor: SoftPalette.amber200,
             ),
-            const SizedBox(width: 24),
+            const SizedBox(width: 18),
             IconButton(
               icon: FaIcon(FontAwesomeIcons.whatsapp, color: context.adapt(SoftPalette.green350), size: 20),
               onPressed: () => onSendWhatsApp(student, log),
@@ -4389,6 +4790,126 @@ class _StudentLogCard extends StatelessWidget {
                           ),
                         ],
                         middleRow,
+                        if (att == 'present') ...[
+                          const SizedBox(height: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isDark ? SoftPalette.slate900.withValues(alpha: 0.6) : SoftPalette.slate100,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isDark ? SoftPalette.slate700 : SoftPalette.slate200,
+                                width: 0.8,
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.access_time_rounded,
+                                          size: 15,
+                                          color: isDark ? SoftPalette.slate400 : SoftPalette.slate600,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          context.l.timing,
+                                          style: context.urduStyle(
+                                            style: TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                              color: isDark ? SoftPalette.slate350 : SoftPalette.slate700,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    SegmentedTimingToggle(
+                                      isLate: isLate,
+                                      arrivalTime: arrivalTime,
+                                      isEnabled: !isReadOnly,
+                                      showLabel: false,
+                                      isCompact: true,
+                                      onChanged: (val) {
+                                        onUpdateLocal(sId, 'isLate', val);
+                                        onUpdateLocal(sId, 'timing', val ? 'late' : 'on_time');
+                                        if (val) {
+                                          final existingTime = log['arrivalTime']?.toString();
+                                          if (existingTime == null || existingTime.isEmpty) {
+                                            final nowTime = DateFormat('hh:mm a').format(DateTime.now());
+                                            onUpdateLocal(sId, 'arrivalTime', nowTime);
+                                          }
+                                        } else {
+                                          onUpdateLocal(sId, 'arrivalTime', null);
+                                        }
+                                      },
+                                      onPickTime: isReadOnly ? null : () => _selectArrivalTime(context, sId, arrivalTime),
+                                    ),
+                                  ],
+                                ),
+                                if (isLate && arrivalTime != null && arrivalTime.isNotEmpty) ...[
+                                  const SizedBox(height: 6),
+                                  InkWell(
+                                    onTap: isReadOnly ? null : () => _selectArrivalTime(context, sId, arrivalTime),
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Container(
+                                      width: double.infinity,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                      decoration: BoxDecoration(
+                                        color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(8),
+                                        border: Border.all(
+                                          color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.4),
+                                          width: 0.8,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.schedule_rounded, size: 13, color: context.adapt(SoftPalette.amber400)),
+                                              const SizedBox(width: 5),
+                                              Text(
+                                                context.isUrdu ? 'آمد کا وقت: $arrivalTime' : 'Arrival: $arrivalTime',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: context.adapt(SoftPalette.amber400),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                context.isUrdu ? 'تبدیل کریں' : 'Change',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: context.adapt(SoftPalette.amber400),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 2),
+                                              Icon(Icons.edit_rounded, size: 11, color: context.adapt(SoftPalette.amber400)),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     )
                   : desktopRow,

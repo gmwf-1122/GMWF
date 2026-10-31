@@ -1331,14 +1331,25 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
           ? CampSessionService.getCampLabel(effectiveCampId)
           : LocalStorageService.getBranchName(widget.branchId);
 
-      final nextSeq = await LocalStorageService.getNextLocalSerialSequence(
+      final localSeq = await LocalStorageService.getNextLocalSerialSequence(
+        widget.branchId,
+        dateKey,
+        dispensaryId: effectiveCampId,
+        session: session,
+      );
+      final sessionLetter = CampSessionService.getSessionLetter(session);
+      // The LAN server numbers tokens for every desk (no two patients on one number); this
+      // desk's own count is used only when the server cannot be reached.
+      final serverSeq = await RealtimeManager().reserveSerial('$dateKey$sessionLetter-$normDispTag', localSeq);
+      final nextSeq = (serverSeq != null && serverSeq > localSeq) ? serverSeq : localSeq;
+      await LocalStorageService.getNextLocalSerialSequence(
         widget.branchId,
         dateKey,
         dispensaryId: effectiveCampId,
         session: session,
         increment: true,
+        atLeast: nextSeq,
       );
-      final sessionLetter = CampSessionService.getSessionLetter(session);
       final seqPadded = nextSeq.toString().padLeft(3, '0');
       final serial = '$dateKey$sessionLetter-$normDispTag-$seqPadded';
       final entryData = <String, dynamic>{

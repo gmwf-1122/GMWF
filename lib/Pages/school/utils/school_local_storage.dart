@@ -1,12 +1,18 @@
 // lib/pages/school/utils/school_local_storage.dart
 
+import 'dart:async';
+import 'dart:convert';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:collection/collection.dart';
+import '../../../services/image_upload_service.dart';
 import '../../../services/local_storage_service.dart';
+import '../../../services/network_health_service.dart';
 import '../../../services/sync_service.dart';
+import '../../madrassa/utils/madrassa_local_storage.dart';
 
 class SchoolLocalStorage {
   static const String studentsBox  = LocalStorageService.schoolStudentsBox;
@@ -37,6 +43,136 @@ class SchoolLocalStorage {
         await LocalStorageService.openBoxSafe(name);
       }
     }
+    unawaited(MadrassaLocalStorage.healPoisonedMadrassaSyncQueue());
+  }
+
+  static String normalizeBranch(String branchId) => MadrassaLocalStorage.normalizeBranch(branchId);
+
+  static const Map<String, List<String>> _mediaAliases = {
+    'photoUrl': ['photoBase64', 'studentPhotoBase64'],
+    'bformUrl': ['bformBase64', 'bFormUrl', 'bFormBase64'],
+    'guardianCnicUrl': ['guardianCnicBase64', 'fatherCnicUrl', 'fatherCnicBase64'],
+  };
+
+  /// Compresses School student media (photo, B-Form, guardian CNIC, additional documents)
+  /// to ensure payloads never exceed Firestore's 1 MiB document limit.
+  static Map<String, dynamic> compactMediaForCloud(Map<String, dynamic> data) {
+    final out = Map<String, dynamic>.from(data);
+    _mediaAliases.forEach((primary, aliases) {
+      var value = out[primary];
+      if (value is! String || value.isEmpty) {
+        for (final a in aliases) {
+          final v = out[a];
+          if (v is String && v.isNotEmpty) {
+            out[primary] = v;
+            value = v;
+            break;
+          }
+        }
+      }
+      for (final a in aliases) {
+        out.remove(a);
+      }
+    });
+
+    // 1. Compress primary media fields
+    for (final primary in _mediaAliases.keys) {
+      final val = out[primary];
+      if (val is String && val.length > 25000 && ImageUploadService.isValidMediaString(val)) {
+        try {
+          final bytes = ImageUploadService.decodeBase64ToBytes(val);
+          if (bytes != null && bytes.isNotEmpty) {
+            final isAvatar = primary == 'photoUrl';
+            final recompressed = ImageUploadService.processBytesToBase64(
+              bytes,
+              maxWidth: isAvatar ? 350 : 550,
+              maxHeight: isAvatar ? 350 : 550,
+              quality: isAvatar ? 55 : 45,
+            );
+            if (recompressed != null && recompressed.isNotEmpty && recompressed.length < val.length) {
+              out[primary] = recompressed;
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    // 2. Compress additionalDocuments list
+    if (out['additionalDocuments'] is List) {
+      final docList = List<Map<String, dynamic>>.from(
+        (out['additionalDocuments'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+      );
+      for (final doc in docList) {
+        final docUrl = doc['url'];
+        if (docUrl is String && docUrl.length > 25000 && ImageUploadService.isValidMediaString(docUrl)) {
+          try {
+            final bytes = ImageUploadService.decodeBase64ToBytes(docUrl);
+            if (bytes != null && bytes.isNotEmpty) {
+              final recompressed = ImageUploadService.processBytesToBase64(
+                bytes,
+                maxWidth: 550,
+                maxHeight: 550,
+                quality: 45,
+              );
+              if (recompressed != null && recompressed.isNotEmpty && recompressed.length < docUrl.length) {
+                doc['url'] = recompressed;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      out['additionalDocuments'] = docList;
+    }
+
+    // 3. Strict total document size verification for Firestore's 1 MiB limit
+    try {
+      final jsonStr = jsonEncode(out);
+      if (jsonStr.length > 450000) {
+        for (final primary in _mediaAliases.keys) {
+          final val = out[primary];
+          if (val is String && val.length > 20000 && ImageUploadService.isValidMediaString(val)) {
+            final bytes = ImageUploadService.decodeBase64ToBytes(val);
+            if (bytes != null && bytes.isNotEmpty) {
+              final isAvatar = primary == 'photoUrl';
+              final emergency = ImageUploadService.processBytesToBase64(
+                bytes,
+                maxWidth: isAvatar ? 250 : 400,
+                maxHeight: isAvatar ? 250 : 400,
+                quality: isAvatar ? 45 : 35,
+              );
+              if (emergency != null && emergency.isNotEmpty && emergency.length < val.length) {
+                out[primary] = emergency;
+              }
+            }
+          }
+        }
+        if (out['additionalDocuments'] is List) {
+          final docList = List<Map<String, dynamic>>.from(
+            (out['additionalDocuments'] as List).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+          );
+          for (final doc in docList) {
+            final docUrl = doc['url'];
+            if (docUrl is String && docUrl.length > 20000 && ImageUploadService.isValidMediaString(docUrl)) {
+              final bytes = ImageUploadService.decodeBase64ToBytes(docUrl);
+              if (bytes != null && bytes.isNotEmpty) {
+                final emergency = ImageUploadService.processBytesToBase64(
+                  bytes,
+                  maxWidth: 400,
+                  maxHeight: 400,
+                  quality: 35,
+                );
+                if (emergency != null && emergency.isNotEmpty && emergency.length < docUrl.length) {
+                  doc['url'] = emergency;
+                }
+              }
+            }
+          }
+          out['additionalDocuments'] = docList;
+        }
+      }
+    } catch (_) {}
+
+    return out;
   }
 
   static Box _getStudentsBox()  => Hive.box(studentsBox);
@@ -316,34 +452,54 @@ class SchoolLocalStorage {
     required String studentId,
     required Map<String, dynamic> studentData,
   }) async {
+    final normBranch = normalizeBranch(branchId);
     final nowIso = DateTime.now().toIso8601String();
     studentData['lastModified'] = studentData['lastModified'] ?? nowIso;
     studentData['syncStatus'] = 'pending';
+    studentData['branchId'] = normBranch;
 
-    final cleanData = _sanitize(studentData);
-    await cacheStudent(branchId, studentId, cleanData);
+    final compacted = compactMediaForCloud(studentData);
+    final cleanData = _sanitize(compacted);
+    await cacheStudent(normBranch, studentId, cleanData);
 
+    bool cloudUploaded = false;
     try {
-      final docRef = CloudDb.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('school_students')
-          .doc(studentId);
-      await docRef.set(cleanData, SetOptions(merge: true));
+      final isOnline = NetworkHealthService().isStableOnline ||
+          (!kIsWeb && (await Connectivity().checkConnectivity()).any((r) => r != ConnectivityResult.none));
+      if (isOnline) {
+        final docRef = CloudDb.instance
+            .collection('branches')
+            .doc(normBranch)
+            .collection('school_students')
+            .doc(studentId);
+        final fsData = LocalStorageService.sanitizeForCloudUpload(cleanData);
+        await docRef.set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 5));
 
-      // Mark synced on cloud success
-      cleanData['syncStatus'] = 'synced';
-      cleanData['lastSyncedAt'] = DateTime.now().toIso8601String();
-      await cacheStudent(branchId, studentId, cleanData);
+        // Mark synced on cloud success
+        cloudUploaded = true;
+        cleanData['syncStatus'] = 'synced';
+        cleanData['lastSyncedAt'] = DateTime.now().toIso8601String();
+        cleanData['synced'] = true;
+        cleanData['pendingSync'] = false;
+        await cacheStudent(normBranch, studentId, cleanData);
+      }
     } catch (e) {
-      debugPrint('[SchoolLocalStorage] Cloud save failed: $e');
+      debugPrint('[SchoolLocalStorage] Direct cloud upload deferred to sync queue: $e');
+    }
+
+    if (!cloudUploaded) {
       await LocalStorageService.enqueueSync({
-        'action': 'set',
-        'collection': 'branches/$branchId/school_students',
+        'type': 'save_school_student',
+        'branchId': normBranch,
+        'studentId': studentId,
+        'entityId': studentId,
+        'collection': 'branches/$normBranch/school_students',
         'docId': studentId,
         'data': cleanData,
+        'localBox': LocalStorageService.schoolStudentsBox,
+        'localKey': _studentKey(normBranch, studentId),
       });
-      SyncService().triggerUpload();
+      unawaited(SyncService().triggerUpload(urgent: true));
     }
   }
 

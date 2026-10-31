@@ -790,6 +790,12 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
       final id = (t['id'] ?? t['uid'] ?? t['username']).toString();
       final existingStatus = entries[id]?['status']?.toString();
       final changedStatus = _localAttendanceChanges[id]?['status']?.toString();
+      // Already recorded and not touched now: keep it as it is. Re-stamping it
+      // pushed this PC's possibly stale copy over another desk's later change.
+      if (changedStatus == null && existingStatus != null) continue;
+      // Never marked: still shown and saved as present, but flagged so a real
+      // status from another PC wins over it when the two meet.
+      final isAuto = changedStatus == null && existingStatus == null;
       final finalStatus = (changedStatus ?? existingStatus ?? 'present').toLowerCase();
       final reason = (_localAttendanceChanges[id]?['leaveReason'] ?? entries[id]?['leaveReason'] ?? '').toString().trim();
 
@@ -803,6 +809,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
         'session': t['session'] ?? 'morning',
         'markedAt': DateTime.now().toIso8601String(),
         'markedBy': widget.principalUsername,
+        'autoPresent': isAuto,
       };
     }
 

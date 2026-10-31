@@ -859,7 +859,7 @@ class _LegendRow extends StatelessWidget {
           Container(width: isSmall ? 8 : 12, height: isSmall ? 8 : 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 12),
           Expanded(child: Text(label, style: TextStyle(fontSize: isSmall ? 11 : 13, fontWeight: isSmall ? FontWeight.w500 : FontWeight.w700, color: context.adapt(AppColors.gray700)))),
-          Text('PKR ${NumberFormat('#,###').format(amount)}', style: GoogleFonts.dmMono(fontSize: isSmall ? 11 : 12, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray900))),
+          Text('PKR ${NumberFormat('#,###').format(amount)}', style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: isSmall ? 11 : 12, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray900))),
         ],
       ),
     );
@@ -1221,7 +1221,7 @@ class _TrendSelectionSummary extends StatelessWidget {
                     ),
                     Text(
                       'PKR ${NumberFormat('#,###').format(e.value)}',
-                      style: GoogleFonts.dmMono(color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.w700),
+                      style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(width: 8),
                     SizedBox(
@@ -1493,7 +1493,7 @@ class _NatureBreakdownChart extends StatelessWidget {
               Container(width: 8, height: 8, decoration: BoxDecoration(color: sub.color, shape: BoxShape.circle)),
               const SizedBox(width: 10),
               Expanded(child: Text(sub.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: context.adapt(AppColors.gray600)))),
-              Text('PKR ${NumberFormat('#,###').format(e.value)}', style: GoogleFonts.dmMono(fontSize: 12, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray900))),
+              Text('PKR ${NumberFormat('#,###').format(e.value)}', style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 12, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray900))),
             ],
           ),
         );
@@ -1540,7 +1540,7 @@ class _DonorRankingList extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text('PKR ${NumberFormat('#,###').format(data.total)}', 
-                      style: GoogleFonts.dmMono(fontSize: 13, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
+                      style: GoogleFonts.inter(fontFeatures: const [FontFeature.tabularFigures()], fontSize: 13, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
                   Text(
                     'Cash: PKR ${NumberFormat('#,###').format(data.cashTotal)} · Goods: PKR ${NumberFormat('#,###').format(data.goodsTotal)}',
                     style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: context.adapt(AppColors.gray500)),

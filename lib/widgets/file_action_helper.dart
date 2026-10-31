@@ -176,7 +176,7 @@ class FileActionHelper {
                   ),
 
                 // 3. Windows Explorer / Folder Location
-                if (Platform.isWindows && resolvedPath != null && resolvedPath.isNotEmpty)
+                if (!kIsWeb && Platform.isWindows && resolvedPath != null && resolvedPath.isNotEmpty)
                   ListTile(
                     leading: Icon(Icons.folder_open_rounded, color: context.adapt(SoftPalette.orange400)),
                     title: const Text('Show in Folder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),

@@ -144,23 +144,44 @@ String resolveUserDisplayName(Map<String, dynamic>? data, {String fallback = 'Us
         normalized.startsWith('loading');
   }
 
-  if (!isPlaceholder(name)) {
+  // A role or a stand-in written when nothing better was known ("Staff User", "Admin",
+  // "Dispenser"...). The header showed these instead of the person's own name; they are used
+  // only when the record has nothing else.
+  bool isRoleLike(String value) => _roleLikeNames.contains(value.toLowerCase());
+
+  if (!isPlaceholder(name) && !isRoleLike(name)) {
     return name;
   }
 
-  if (!isPlaceholder(username)) {
+  if (!isPlaceholder(username) && !isRoleLike(username)) {
     return username;
   }
 
   if (email.contains('@')) {
     final parts = email.split('@').first;
-    if (parts.isNotEmpty) {
+    if (parts.isNotEmpty && !isRoleLike(parts)) {
       return parts[0].toUpperCase() + parts.substring(1);
     }
   }
 
-  return !isPlaceholder(name) ? name : fallback;
+  if (!isPlaceholder(name)) return name;
+  if (!isPlaceholder(username)) return username;
+  return fallback;
 }
+
+/// Whether [value] is not a person's own name: empty, a placeholder, or a role/stand-in such
+/// as "Staff User" or "Admin" (see [resolveUserDisplayName]).
+bool isStandInUserName(String? value) {
+  final v = (value ?? '').trim().toLowerCase();
+  return v.isEmpty || v == 'null' || v == 'user' || v == 'unknown' || v.startsWith('loading') ||
+      _roleLikeNames.contains(v);
+}
+
+const _roleLikeNames = {
+  'staff user', 'staff', 'admin', 'administrator', 'super admin', 'superadmin', 'global admin',
+  'doctor', 'receptionist', 'dispenser', 'supervisor', 'manager', 'teacher', 'office boy',
+  'cashier', 'accountant', 'hq', 'hq manager',
+};
 /// Dose timing as the doctor types it: digits only, '+' inserted automatically.
 /// Three doses — Morning+Evening+Night: "101" → "1+0+1". Backspace over a '+' removes the dose before it.
 class DoseTimingInputFormatter extends TextInputFormatter {

@@ -23,6 +23,8 @@ import '../pages/madrassa/utils/madrassa_local_storage.dart';
 /// Keyed by "branchId|yyyy-MM-dd".
 final Map<String, BranchStats> _historicalStatsCache = {};
 final Map<String, _CachedLocalBranchStats> _localStatsTTLCache = {};
+final Map<String, (DateTime, Map<String, int>)> _weeklyPatientsMemoryCache = {};
+final Map<String, Future<Map<String, TodayVsYesterday>>> _batchStatsInFlight = {};
 
 /// Called by the dashboard's refresh. It cleared only the local TTL cache, so the cloud counts
 /// (10 min for today, 6 h for past days) and frozen past-day local stats survived a refresh and
@@ -33,6 +35,10 @@ void clearLocalStatsCache() {
   _cloudBranchStatsCache.clear();
   _cloudDayCountsCache.clear();
   _cloudAuxCache.clear();
+  _weeklyPatientsMemoryCache.clear();
+  _batchStatsInFlight.clear();
+  _chartPointsMemoryCache.clear();
+  _cachedKarachiCampBreakdown = null;
 }
 
 /// Computations already running, so a second caller (the dashboard's provider and its
@@ -157,7 +163,8 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
   var scanned = 0;
 
   // 1. Calculate donations from DonationsLocalStorage
-  int donTotal = 0;
+  // Summed exactly and rounded once: each donation used to be cut to a whole number first.
+  double donTotal = 0;
   try {
     if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
       final donBox = Hive.box(DonationsLocalStorage.donationsBox);
@@ -176,7 +183,7 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
 
             final amt = val['amount'];
             final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
-            donTotal += amtDouble.toInt();
+            donTotal += amtDouble;
           }
         }
       }
@@ -338,8 +345,11 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
     final log = MadrassaLocalStorage.getLogCached(branchId, dateKeyMadrassa);
     if (log != null) {
       for (final v in log.values) {
-        if (v is Map && v['attendance'] == 'present') {
-          madrassaAttendance++;
+        if (v is Map) {
+          final s = (v['attendance'] ?? v['status'])?.toString().toLowerCase().trim();
+          if (s == 'present' || s == 'p') {
+            madrassaAttendance++;
+          }
         }
       }
     }
@@ -381,7 +391,7 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
     prescribed: madrassaAttendance,
     dasterkhwaan: das,
     dasterkhwaanServed: served,
-    donations: donTotal,
+    donations: donTotal.round(),
     dispensaryRevenue: dispRev,
     zakatRevenue: zRev,
     nonZakatRevenue: nzRev,
@@ -405,7 +415,7 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
           prescribed: madrassaAttendance,
           dasterkhwaan: mx(das, fsRes.dasterkhwaan),
           dasterkhwaanServed: mx(served, fsRes.dasterkhwaanServed),
-          donations: mx(donTotal, fsRes.donations),
+          donations: mx(donTotal.round(), fsRes.donations),
           dispensaryRevenue: mx(dispRev, fsRes.dispensaryRevenue),
           zakatRevenue: mx(zRev, fsRes.zakatRevenue),
           nonZakatRevenue: mx(nzRev, fsRes.nonZakatRevenue),
@@ -526,34 +536,42 @@ typedef CloudDayCounts = Map<String, Map<String, CloudQueueCount>>;
 Future<CloudDayCounts> _fetchCloudDayCounts(String branchId, String dmyy) async {
   final out = <String, Map<String, CloudQueueCount>>{};
   final jobs = <Future<void>>[];
+  // Camp key -> every day document that can hold that camp's tokens, across ALL of the
+  // branch's Firestore ids. Karachi has four ids, and Saddar tokens sit in both '<date>' and
+  // '<date>_saddar'. Counting each document separately and adding them counted a token found
+  // in two of them twice (dashboard: Saddar 21, Branches: 11). Grouped together, a token in
+  // several documents is counted once (see below).
+  final groups = <String, List<DocumentReference<Map<String, dynamic>>>>{};
   for (final fsBranch in CampSessionService.firestoreBranchIds(branchId)) {
     final base = FirebaseFirestore.instance.collection('branches').doc(fsBranch).collection('serials');
-    final groups = <String, List<String>>{};
+    final karachi = CampSessionService.isKarachiFamily(fsBranch);
     for (final id in CampSessionService.getAllCampDateDocIds(branchId: fsBranch, dateKey: dmyy)) {
       var key = id == dmyy ? '' : id.substring(dmyy.length + 1);
-      if (CampSessionService.isKarachiFamily(fsBranch) && key.contains('haji')) key = 'haji';
-      groups.putIfAbsent(key, () => []).add(id);
+      if (karachi) key = key.contains('haji') ? 'haji' : 'saddar';
+      groups.putIfAbsent(key, () => []).add(base.doc(id));
     }
-    groups.forEach((campKey, docIds) {
-      for (final q in _cloudQueues) {
-        jobs.add(() async {
-          // One queue failing (timeout, missing index) must not void the branch's other
-          // queues: a single error used to make the whole branch fall back to local zeros.
-          try {
-            final cols = [for (final id in docIds) base.doc(id).collection(q)];
-            final counts = await Future.wait(cols.map(_countQueue));
-            final filled = counts.where((c) => c.total > 0).length;
-            final c = filled > 1
-                ? await _countQueueDeduped(cols)
-                : counts.firstWhere((c) => c.total > 0, orElse: CloudQueueCount.new);
-            out.putIfAbsent(campKey, () => {}).putIfAbsent(q, CloudQueueCount.new).add(c);
-          } catch (e) {
-            debugPrint('[HomeDashboard] cloud count $fsBranch/$campKey/$q failed: $e');
-          }
-        }());
-      }
-    });
   }
+  groups.forEach((campKey, days) {
+    for (final q in _cloudQueues) {
+      jobs.add(() async {
+        // One queue failing (timeout, missing index) must not void the branch's other
+        // queues: a single error used to make the whole branch fall back to local zeros.
+        try {
+          final cols = [for (final day in days) day.collection(q)];
+          final counts = await Future.wait(cols.map(_countQueue));
+          // Count queries cannot see a token stored twice; only when more than one document
+          // holds tokens are those documents read and merged (an empty one costs no reads).
+          final filled = [for (var i = 0; i < cols.length; i++) if (counts[i].total > 0) cols[i]];
+          final c = filled.length > 1
+              ? await _countQueueDeduped(filled)
+              : counts.firstWhere((c) => c.total > 0, orElse: CloudQueueCount.new);
+          out.putIfAbsent(campKey, () => {}).putIfAbsent(q, CloudQueueCount.new).add(c);
+        } catch (e) {
+          debugPrint('[HomeDashboard] cloud count $branchId/$campKey/$q failed: $e');
+        }
+      }());
+    }
+  });
   await Future.wait(jobs);
   return out;
 }
@@ -587,6 +605,8 @@ class CloudAuxCounts {
   int emp = 0;
   int madrassa = 0;
   int madrassaYesterday = 0;
+  int madrassaTeachers = 0;
+  int madrassaTeachersYesterday = 0;
   int schoolStudents = 0;
   int schoolTeachers = 0;
 }
@@ -629,33 +649,49 @@ Future<CloudAuxCounts?> fetchCloudAuxCountsCached(List<String> branchIds) {
 
   final future = () async {
     final out = CloudAuxCounts();
+    final allEmpPresentKeys = <String>{};
     await Future.wait(ids.map((b) async {
       final branch = fs.collection('branches').doc(b);
       // Attendance is stored under the marking PC's spelling ('grt' / 'gujrat'); Karachi's
       // sub-camps are mirrored into 'karachi', so it is read once.
       final empBranches = b == 'karachi' ? const ['karachi'] : FinanceLocalStorage.attendanceBranchIds(b);
-      Future<int> empCount() async {
-        var n = 0;
+      Future<Set<String>> empPresentKeys() async {
+        final keys = <String>{};
         for (final eb in empBranches) {
-          n += await _countOf(fs.collection('branches').doc(eb).collection('employee_attendance').doc(today)
-                  .collection('records').where('status', whereIn: ['present', 'late', 'overtime']))
-              .catchError((_) => 0);
+          try {
+            final snap = await fs.collection('branches').doc(eb).collection('employee_attendance').doc(today)
+                    .collection('records').where('status', whereIn: ['present', 'late', 'overtime'])
+                    .get().timeout(_cloudQueryTimeout);
+            for (final doc in snap.docs) {
+              final d = doc.data();
+              final pin = (d['pin'] ?? d['biometricPin'])?.toString().trim() ?? '';
+              final empId = (d['employeeId'] ?? d['localId'] ?? doc.id).toString().trim();
+              final name = (d['employeeName'] ?? d['name'])?.toString().trim().toLowerCase() ?? '';
+              final key = pin.isNotEmpty ? 'pin:$pin' : (empId.isNotEmpty ? 'id:$empId' : 'name:$name');
+              if (key.isNotEmpty) keys.add(key);
+            }
+          } catch (_) {}
         }
-        return n;
+        return keys;
       }
       final r = await Future.wait<Object?>([
-        empCount(),
+        empPresentKeys(),
         docData(branch.collection('madrassa_daily_logs').doc(today)),
         docData(branch.collection('madrassa_daily_logs').doc(yesterday)),
         docData(branch.collection('school_attendance').doc(today)),
         docData(branch.collection('school_teacher_attendance').doc(today)),
+        docData(branch.collection('madrassa_teacher_attendance').doc(today)),
+        docData(branch.collection('madrassa_teacher_attendance').doc(yesterday)),
       ]);
-      out.emp += r[0] as int;
+      allEmpPresentKeys.addAll(r[0] as Set<String>);
       out.madrassa += _countPresentEntries(r[1] as Map<String, dynamic>?);
       out.madrassaYesterday += _countPresentEntries(r[2] as Map<String, dynamic>?);
       out.schoolStudents += _countPresentEntries(r[3] as Map<String, dynamic>?, nested: true);
       out.schoolTeachers += _countPresentEntries(r[4] as Map<String, dynamic>?, nested: true);
+      out.madrassaTeachers += _countPresentEntries(r[5] as Map<String, dynamic>?, nested: true);
+      out.madrassaTeachersYesterday += _countPresentEntries(r[6] as Map<String, dynamic>?, nested: true);
     }));
+    out.emp = allEmpPresentKeys.length;
     return out;
   }().then<CloudAuxCounts?>((v) => v).catchError((Object e) {
     debugPrint('[HomeDashboard] cloud attendance counts failed: $e');
@@ -678,6 +714,8 @@ Future<Map<String, int>> mergeCloudAuxCounts(Map<String, int> local, List<String
     'teachers': mx('teachers', c.schoolTeachers),
     'madrassa': mx('madrassa', c.madrassa),
     'madrassa_yesterday': mx('madrassa_yesterday', c.madrassaYesterday),
+    'madrassa_teachers': mx('madrassa_teachers', c.madrassaTeachers),
+    'madrassa_teachers_yesterday': mx('madrassa_teachers_yesterday', c.madrassaTeachersYesterday),
   };
 }
 
@@ -697,7 +735,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
     final fsBranches = CampSessionService.firestoreBranchIds(bId);
 
     // 1. Donations (stored with date 'yyyy-MM-dd').
-    int donTotal = 0;
+    double donTotal = 0;
     for (final fsBranch in fsBranches) {
       try {
         final donSnap = await FirebaseFirestore.instance
@@ -714,7 +752,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
           if (payMethod == 'bank_deposit') continue;
           final amt = val['amount'];
           final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
-          donTotal += amtDouble.toInt();
+          donTotal += amtDouble;
         }
       } catch (_) {}
     }
@@ -764,7 +802,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
             prescribed: 0,
             dasterkhwaan: das,
             dasterkhwaanServed: served,
-            donations: donTotal,
+            donations: donTotal.round(),
             dispensaryRevenue: zRev + nzRev,
             zakatRevenue: zRev,
             nonZakatRevenue: nzRev,
@@ -839,15 +877,422 @@ class TodayVsYesterday {
 Future<Map<String, TodayVsYesterday>> fetchTodayVsYesterdayPerBranch(
     List<String> ids, {bool allowRemoteFallback = false}) async {
   if (ids.isEmpty) return {};
-  final yesterday = DateTime.now().subtract(const Duration(days: 1));
 
-  final todayResults = await Future.wait(ids.map((id) => fetchLocalBranchStats(id, DateTime.now(), allowRemoteFallback: allowRemoteFallback)));
-  final yestResults = await Future.wait(ids.map((id) => fetchLocalBranchStats(id, yesterday, allowRemoteFallback: allowRemoteFallback)));
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final yesterday = today.subtract(const Duration(days: 1));
+  final todayYmd = DateFormat('yyyy-MM-dd').format(today);
+  final yestYmd = DateFormat('yyyy-MM-dd').format(yesterday);
 
+  // 1. Instant check: are all requested branches already in memory cache?
+  bool allCached = true;
+  for (final id in ids) {
+    final bId = id.toLowerCase().trim();
+    final todayCacheKey = allowRemoteFallback ? '$bId|$todayYmd|cloud' : '$bId|$todayYmd';
+    final yestCacheKey = allowRemoteFallback ? '$bId|$yestYmd|cloud' : '$bId|$yestYmd';
+    final todayCached = _localStatsTTLCache[todayCacheKey]?.isValid == true;
+    final yestCached = _historicalStatsCache.containsKey(yestCacheKey) || (_localStatsTTLCache[yestCacheKey]?.isValid == true);
+    if (!todayCached || !yestCached) {
+      allCached = false;
+      break;
+    }
+  }
+
+  if (allCached) {
+    final out = <String, TodayVsYesterday>{};
+    for (final id in ids) {
+      final bId = id.toLowerCase().trim();
+      final todayCacheKey = allowRemoteFallback ? '$bId|$todayYmd|cloud' : '$bId|$todayYmd';
+      final yestCacheKey = allowRemoteFallback ? '$bId|$yestYmd|cloud' : '$bId|$yestYmd';
+      final todayStats = _localStatsTTLCache[todayCacheKey]!.stats;
+      final yestStats = _historicalStatsCache[yestCacheKey] ?? _localStatsTTLCache[yestCacheKey]!.stats;
+      out[id] = TodayVsYesterday(today: todayStats, yesterday: yestStats);
+    }
+    return out;
+  }
+
+  // 2. In-flight deduplication to prevent parallel batch scans
+  final inFlightKey = '${(List<String>.from(ids)..sort()).join(',')}|$allowRemoteFallback';
+  final running = _batchStatsInFlight[inFlightKey];
+  if (running != null) return running;
+
+  final job = _computeBatchTodayVsYesterday(ids, today, yesterday, todayYmd, yestYmd, allowRemoteFallback);
+  _batchStatsInFlight[inFlightKey] = job;
+  try {
+    return await job;
+  } finally {
+    _batchStatsInFlight.remove(inFlightKey);
+  }
+}
+
+class _BatchBranchStatsAcc {
+  final String branchId;
+  double donTotal = 0;
+  final Map<String, Map> entryMap = {};
+  int das = 0;
+  int served = 0;
+  int empAttendance = 0;
+  int madrassaAttendance = 0;
+
+  _BatchBranchStatsAcc(this.branchId);
+
+  BranchStats toBranchStats(DateTime date, {bool isToday = false}) {
+    final dateKeyDmyy = DateFormat('ddMMyy').format(date);
+    int z = 0, nz = 0, gm = 0, dispensed = 0, dispRev = 0;
+    int zRev = 0, nzRev = 0, gmRev = 0;
+
+    for (final val in entryMap.values) {
+      final type = (val['queueType'] ?? val['category'] ?? val['type'] ?? '').toString().toLowerCase();
+      final days = (val['daysOfMedicine'] as num?)?.toInt() ?? 1;
+      final status = val['status']?.toString().toLowerCase();
+
+      if (type.contains('non-zakat') || type.contains('nonzakat') || type.contains('non_zakat')) {
+        nz++;
+        final rev = 100 * days;
+        dispRev += rev;
+        nzRev += rev;
+      } else if (type.contains('gmwf')) {
+        gm++;
+      } else if (type.contains('dasterkhwan')) {
+        das++;
+      } else {
+        z++;
+        final rev = 20 * days;
+        dispRev += rev;
+        zRev += rev;
+      }
+
+      if (status == 'dispensed' || (val['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed') {
+        dispensed++;
+      }
+    }
+
+    if (z == 0 && nz == 0 && gm == 0 && das == 0) {
+      try {
+        final cachedDocs = LocalStorageService.getBranchDayCache(branchId, dateKeyDmyy, 'dispensary');
+        if (cachedDocs != null) {
+          for (final val in cachedDocs) {
+            final type = (val['queueType'] ?? val['type'])?.toString().toLowerCase();
+            final days = (val['daysOfMedicine'] as num?)?.toInt() ?? 1;
+
+            if (type == 'zakat') {
+              z++;
+              final rev = 20 * days;
+              dispRev += rev;
+              zRev += rev;
+            } else if (type == 'non-zakat') {
+              nz++;
+              final rev = 100 * days;
+              dispRev += rev;
+              nzRev += rev;
+            } else if (type == 'gmwf') {
+              gm++;
+            }
+            dispensed++;
+          }
+        }
+      } catch (_) {}
+    }
+
+    return BranchStats(
+      zakat: z,
+      nonZakat: nz,
+      gmwf: gm,
+      dispensed: dispensed,
+      prescribed: madrassaAttendance,
+      dasterkhwaan: das,
+      dasterkhwaanServed: served,
+      donations: donTotal.round(),
+      dispensaryRevenue: dispRev,
+      zakatRevenue: zRev,
+      nonZakatRevenue: nzRev,
+      gmwfRevenue: gmRev,
+      employeeAttendance: empAttendance,
+    );
+  }
+}
+
+Future<Map<String, TodayVsYesterday>> _computeBatchTodayVsYesterday(
+    List<String> ids, DateTime today, DateTime yesterday, String todayYmd, String yestYmd, bool allowRemoteFallback) async {
+  final targetBranchIds = ids.map((e) => e.toLowerCase().trim()).toList();
+  final todayDmyy = DateFormat('ddMMyy').format(today);
+  final yestDmyy = DateFormat('ddMMyy').format(yesterday);
+
+  final todayAcc = <String, _BatchBranchStatsAcc>{for (final id in targetBranchIds) id: _BatchBranchStatsAcc(id)};
+  final yestAcc = <String, _BatchBranchStatsAcc>{for (final id in targetBranchIds) id: _BatchBranchStatsAcc(id)};
+
+  var scanned = 0;
+
+  // Single pass 1: Local Donations
+  try {
+    if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
+      final donBox = Hive.box(DonationsLocalStorage.donationsBox);
+      final donValues = donBox.values.toList();
+      for (final val in donValues) {
+        if (++scanned % _scanSlice == 0) await _breathe();
+        if (val is! Map) continue;
+        final d = val['date'] ?? val['createdAt'] ?? val['timestamp'];
+        final isTod = _isSameDate(d, todayYmd, todayDmyy);
+        final isYest = !isTod && _isSameDate(d, yestYmd, yestDmyy);
+        if (!isTod && !isYest) continue;
+
+        final status = val['status']?.toString().toLowerCase();
+        final syncStatus = val['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || syncStatus == 'deleted') continue;
+
+        final payMethod = val['paymentMethod']?.toString().toLowerCase() ?? '';
+        if (payMethod == 'bank_deposit') continue;
+
+        final amt = val['amount'];
+        final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+        final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+
+        for (final id in targetBranchIds) {
+          if (_isMatchingBranch(b, id)) {
+            if (isTod) {
+              todayAcc[id]!.donTotal += amtDouble;
+            } else {
+              yestAcc[id]!.donTotal += amtDouble;
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error batch computing donations: $e');
+  }
+
+  // Single pass 2: Dispensary entries
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      final box = Hive.box(LocalStorageService.entriesBox);
+      final entryValues = box.values.toList();
+      for (final e in entryValues) {
+        if (++scanned % _scanSlice == 0) await _breathe();
+        if (e is! Map) continue;
+        final status = e['status']?.toString().toLowerCase();
+        final syncStatus = e['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || syncStatus == 'deleted') continue;
+
+        final dk = e['dateKey']?.toString();
+        final rawDate = e['dateKey'] ?? e['date'] ?? e['createdAt'] ?? e['timestamp'] ?? e['serial'];
+        final isTod = (dk == todayDmyy || _isSameDate(rawDate, todayYmd, todayDmyy));
+        final isYest = !isTod && (dk == yestDmyy || _isSameDate(rawDate, yestYmd, yestDmyy));
+        if (!isTod && !isYest) continue;
+
+        final b = (e['branchId'] as String? ?? '').toLowerCase().trim();
+        final rawSerial = (e['serial'] ?? e['id'] ?? e['tokenNumber'] ?? '').toString().trim().toLowerCase();
+
+        for (final id in targetBranchIds) {
+          if (_isMatchingBranch(b, id, rawSerial)) {
+            final canonicalKey = CampSessionService.cleanSerial(rawSerial, id).toUpperCase();
+            final key = canonicalKey.isNotEmpty ? canonicalKey : rawSerial;
+            final acc = isTod ? todayAcc[id]! : yestAcc[id]!;
+            acc.entryMap[key] = e;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error batch computing dispensary entries: $e');
+  }
+
+  // Single pass 3: Food tokens
+  try {
+    if (!Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+    }
+    if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
+      final tokenValues = tokenBox.values.toList();
+      for (final t in tokenValues) {
+        if (++scanned % _scanSlice == 0) await _breathe();
+        if (t is! Map) continue;
+        final status = t['status']?.toString().toLowerCase();
+        final syncStatus = t['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || status == 'void' || syncStatus == 'deleted') continue;
+
+        final dk = t['dateKey']?.toString() ?? '';
+        final rawD = t['createdAt'] ?? t['timestamp'] ?? t['date'] ?? t['time'];
+        final isTod = (dk == todayYmd || dk == todayDmyy || _isSameDate(rawD, todayYmd, todayDmyy));
+        final isYest = !isTod && (dk == yestYmd || dk == yestDmyy || _isSameDate(rawD, yestYmd, yestDmyy));
+        if (!isTod && !isYest) continue;
+
+        final b = (t['branchId'] as String? ?? '').toLowerCase().trim();
+        for (final id in targetBranchIds) {
+          if (b.isEmpty || _isMatchingBranch(b, id)) {
+            final acc = isTod ? todayAcc[id]! : yestAcc[id]!;
+            acc.das++;
+            if (t['served'] == true) acc.served++;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error batch computing food tokens: $e');
+  }
+
+  // Single pass 4: Employee Attendance
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+      final attBox = Hive.box(LocalStorageService.attendanceBox);
+      final attKeys = attBox.keys.toList();
+      for (final key in attKeys) {
+        if (++scanned % _scanSlice == 0) await _breathe();
+        final keyStr = key.toString();
+        final isTod = keyStr.endsWith('_$todayYmd') || keyStr.endsWith(todayYmd);
+        final isYest = !isTod && (keyStr.endsWith('_$yestYmd') || keyStr.endsWith(yestYmd));
+        if (!isTod && !isYest) continue;
+
+        final val = attBox.get(key);
+        if (val is Map) {
+          final status = val['status']?.toString().toLowerCase();
+          if (status == 'present' || status == 'late' || status == 'overtime') {
+            final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+            for (final id in targetBranchIds) {
+              if (_isMatchingBranch(b, id)) {
+                final acc = isTod ? todayAcc[id]! : yestAcc[id]!;
+                acc.empAttendance++;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error batch computing employee attendance: $e');
+  }
+
+  // Pass 5: Madrassa Attendance
+  for (final id in targetBranchIds) {
+    try {
+      final logTod = MadrassaLocalStorage.getLogCached(id, todayYmd);
+      if (logTod != null) {
+        for (final v in logTod.values) {
+          if (v is Map) {
+            final s = (v['attendance'] ?? v['status'])?.toString().toLowerCase().trim();
+            if (s == 'present' || s == 'p') todayAcc[id]!.madrassaAttendance++;
+          }
+        }
+      }
+      final logYest = MadrassaLocalStorage.getLogCached(id, yestYmd);
+      if (logYest != null) {
+        for (final v in logYest.values) {
+          if (v is Map) {
+            final s = (v['attendance'] ?? v['status'])?.toString().toLowerCase().trim();
+            if (s == 'present' || s == 'p') yestAcc[id]!.madrassaAttendance++;
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // Convert accumulators to BranchStats and optionally combine with remote counts
   final out = <String, TodayVsYesterday>{};
   for (var i = 0; i < ids.length; i++) {
-    out[ids[i]] = TodayVsYesterday(today: todayResults[i], yesterday: yestResults[i]);
+    final rawId = ids[i];
+    final bId = targetBranchIds[i];
+
+    BranchStats todayStats = todayAcc[bId]!.toBranchStats(today, isToday: true);
+    BranchStats yestStats = yestAcc[bId]!.toBranchStats(yesterday, isToday: false);
+
+    // Fast check: if local Hive had 0 food tokens for this branch, check Firestore day summary doc
+    if (todayStats.dasterkhwaan == 0) {
+      try {
+        final dasDoc = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(bId)
+            .collection('dasterkhwaan')
+            .doc(todayYmd)
+            .get()
+            .timeout(const Duration(milliseconds: 1500));
+        if (dasDoc.exists) {
+          final dData = dasDoc.data() ?? {};
+          final tot = (dData['totalTokens'] as num?)?.toInt() ?? 0;
+          final srv = (dData['servedTokens'] as num?)?.toInt() ?? 0;
+          if (tot > 0) {
+            todayStats = BranchStats(
+              zakat: todayStats.zakat,
+              nonZakat: todayStats.nonZakat,
+              gmwf: todayStats.gmwf,
+              dispensed: todayStats.dispensed,
+              prescribed: todayStats.prescribed,
+              dasterkhwaan: tot,
+              dasterkhwaanServed: srv > 0 ? srv : todayStats.dasterkhwaanServed,
+              donations: todayStats.donations,
+              dispensaryRevenue: todayStats.dispensaryRevenue,
+              zakatRevenue: todayStats.zakatRevenue,
+              nonZakatRevenue: todayStats.nonZakatRevenue,
+              gmwfRevenue: todayStats.gmwfRevenue,
+              employeeAttendance: todayStats.employeeAttendance,
+            );
+            unawaited(LocalStorageService.downloadDasterkhwaanTokens(bId, days: 2));
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (allowRemoteFallback) {
+      try {
+        final fsResults = await Future.wait([
+          _fetchFirestoreBranchStats(bId, today),
+          _fetchFirestoreBranchStats(bId, yesterday),
+        ]);
+        final fsToday = fsResults[0];
+        final fsYest = fsResults[1];
+        int mx(int a, int b) => a > b ? a : b;
+
+        if (fsToday != null) {
+          todayStats = BranchStats(
+            zakat: mx(todayStats.zakat, fsToday.zakat),
+            nonZakat: mx(todayStats.nonZakat, fsToday.nonZakat),
+            gmwf: mx(todayStats.gmwf, fsToday.gmwf),
+            dispensed: mx(todayStats.dispensed, fsToday.dispensed),
+            prescribed: todayStats.prescribed,
+            dasterkhwaan: mx(todayStats.dasterkhwaan, fsToday.dasterkhwaan),
+            dasterkhwaanServed: mx(todayStats.dasterkhwaanServed, fsToday.dasterkhwaanServed),
+            donations: mx(todayStats.donations, fsToday.donations),
+            dispensaryRevenue: mx(todayStats.dispensaryRevenue, fsToday.dispensaryRevenue),
+            zakatRevenue: mx(todayStats.zakatRevenue, fsToday.zakatRevenue),
+            nonZakatRevenue: mx(todayStats.nonZakatRevenue, fsToday.nonZakatRevenue),
+            gmwfRevenue: todayStats.gmwfRevenue,
+            employeeAttendance: todayStats.employeeAttendance,
+          );
+        }
+
+        if (fsYest != null) {
+          yestStats = BranchStats(
+            zakat: mx(yestStats.zakat, fsYest.zakat),
+            nonZakat: mx(yestStats.nonZakat, fsYest.nonZakat),
+            gmwf: mx(yestStats.gmwf, fsYest.gmwf),
+            dispensed: mx(yestStats.dispensed, fsYest.dispensed),
+            prescribed: yestStats.prescribed,
+            dasterkhwaan: mx(yestStats.dasterkhwaan, fsYest.dasterkhwaan),
+            dasterkhwaanServed: mx(yestStats.dasterkhwaanServed, fsYest.dasterkhwaanServed),
+            donations: mx(yestStats.donations, fsYest.donations),
+            dispensaryRevenue: mx(yestStats.dispensaryRevenue, fsYest.dispensaryRevenue),
+            zakatRevenue: mx(yestStats.zakatRevenue, fsYest.zakatRevenue),
+            nonZakatRevenue: mx(yestStats.nonZakatRevenue, fsYest.nonZakatRevenue),
+            gmwfRevenue: yestStats.gmwfRevenue,
+            employeeAttendance: yestStats.employeeAttendance,
+          );
+        }
+      } catch (_) {}
+    }
+
+    // Cache the computed stats for subsequent single-branch lookups
+    final todayCacheKey = allowRemoteFallback ? '$bId|$todayYmd|cloud' : '$bId|$todayYmd';
+    final yestCacheKey = allowRemoteFallback ? '$bId|$yestYmd|cloud' : '$bId|$yestYmd';
+    _localStatsTTLCache[todayCacheKey] = _CachedLocalBranchStats(todayStats);
+    if (!allowRemoteFallback) {
+      _historicalStatsCache[yestCacheKey] = yestStats;
+    } else {
+      _localStatsTTLCache[yestCacheKey] = _CachedLocalBranchStats(yestStats);
+    }
+
+    out[rawId] = TodayVsYesterday(today: todayStats, yesterday: yestStats);
   }
+
   return out;
 }
 
@@ -1568,7 +2013,7 @@ Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {
   }
 
   final revList = List<int>.filled(months, 0);
-  final donList = List<int>.filled(months, 0);
+  final donList = List<double>.filled(months, 0);
   final tokenList = List<int>.filled(months, 0);
   final monthEmpDayCounts = List<Map<String, int>>.generate(months, (_) => <String, int>{});
 
@@ -1596,7 +2041,7 @@ Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {
         if (m >= 0 && m < months) {
           final amt = val['amount'];
           final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
-          donList[m] += amtDouble.toInt();
+          donList[m] += amtDouble;
         }
       }
     }
@@ -1714,7 +2159,7 @@ Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {
     return HomeLineChartPoint(
       date: endOfMonths[m],
       patientsRevenue: revList[m],
-      donations: donList[m],
+      donations: donList[m].round(),
       tokens: tokenList[m],
       employeesPresent: empAvg,
     );
@@ -1731,6 +2176,12 @@ Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds, {bool 
   if (branchIds.isEmpty) return result;
 
   final now = DateTime.now();
+  final cacheKey = '${(List<String>.from(branchIds)..sort()).join('_')}_$includeCloud';
+  final cached = _weeklyPatientsMemoryCache[cacheKey];
+  if (cached != null && now.difference(cached.$1).inSeconds < 45) {
+    return Map<String, int>.from(cached.$2);
+  }
+
   final startDate = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
   final endDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
 
@@ -1788,25 +2239,28 @@ Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds, {bool 
 
   // Combine with the cloud counts (cached: 10 min today, 6 h older days). Weekly counts were
   // local only, so HQ and any PC that didn't issue the tokens itself showed 0.
-  if (includeCloud) try {
-    await Future.wait(branchIds.map((branchId) async {
-      final perDay = await Future.wait([
-        for (int i = 0; i < 7; i++) fetchCloudDayCountsCached(branchId, now.subtract(Duration(days: i))),
-      ]);
-      var cloudTotal = 0;
-      for (final day in perDay) {
-        for (final queues in (day ?? const <String, Map<String, CloudQueueCount>>{}).values) {
-          for (final c in queues.values) {
-            cloudTotal += c.total;
+  if (includeCloud) {
+    try {
+      await Future.wait(branchIds.map((branchId) async {
+        final perDay = await Future.wait([
+          for (int i = 0; i < 7; i++) fetchCloudDayCountsCached(branchId, now.subtract(Duration(days: i))),
+        ]);
+        var cloudTotal = 0;
+        for (final day in perDay) {
+          for (final queues in (day ?? const <String, Map<String, CloudQueueCount>>{}).values) {
+            for (final c in queues.values) {
+              cloudTotal += c.total;
+            }
           }
         }
-      }
-      if (cloudTotal > (result[branchId] ?? 0)) result[branchId] = cloudTotal;
-    }));
-  } catch (e) {
-    debugPrint('Error adding cloud weekly patient counts: $e');
+        if (cloudTotal > (result[branchId] ?? 0)) result[branchId] = cloudTotal;
+      }));
+    } catch (e) {
+      debugPrint('Error adding cloud weekly patient counts: $e');
+    }
   }
 
+  _weeklyPatientsMemoryCache[cacheKey] = (now, Map<String, int>.from(result));
   return result;
 }
 

@@ -1333,12 +1333,15 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             ),
           );
           final now = DateTime.now();
-          // Upload first: this button used to only download, so students saved on this PC
-          // stayed queued however often it was pressed, while it still said "completed".
-          await SyncService().triggerUpload(force: true, urgent: true);
-          final downloaded = await MadrassaLocalStorage.downloadStudents(widget.branchId, force: true);
-          await MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, now.year, now.month);
-          await MadrassaLocalStorage.downloadHolidays(widget.branchId);
+          // Trigger urgent upload and concurrently download students, monthly logs, and holidays
+          final uploadFuture = SyncService().triggerUpload(urgent: true);
+          final downloadResults = await Future.wait([
+            MadrassaLocalStorage.downloadStudents(widget.branchId, force: true),
+            MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, now.year, now.month),
+            MadrassaLocalStorage.downloadHolidays(widget.branchId),
+            uploadFuture.timeout(const Duration(seconds: 15), onTimeout: () => null),
+          ]);
+          final downloaded = (downloadResults[0] as bool?) ?? false;
           final pending = MadrassaLocalStorage.pendingStudentUploads();
           if (mounted) setState(() {});
           if (context.mounted) {

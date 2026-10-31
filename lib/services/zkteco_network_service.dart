@@ -150,7 +150,10 @@ class ZkTecoNetworkService {
 
   /// Starts the embedded HTTP Server (for ZKTeco ADMS Push) and UDP socket listener
   static Future<bool> startServer({int httpPort = defaultHttpPort}) async {
-    if (kIsWeb) return false;
+    // Desktop only: on an Android phone this bound ports 8088/4370 and polled the
+    // devices every 5 min (disabling each one while it downloads its log),
+    // competing with the branch PC's poller and draining the battery.
+    if (kIsWeb || !(Platform.isWindows || Platform.isLinux || Platform.isMacOS)) return false;
     if (_isListening) {
       if (_activePollingTimer == null || !_activePollingTimer!.isActive) {
         _startActivePolling();
@@ -427,7 +430,6 @@ class ZkTecoNetworkService {
         if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: clientIp, timestamp: timestamp)) {
           continue;
         }
-        recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: clientIp, timestamp: timestamp);
 
         processIncomingPunch(
           pin: cleanPin,
@@ -443,6 +445,8 @@ class ZkTecoNetworkService {
   // ── Processing Incoming Punch & Module Routing ─────────────────────────────
 
   /// Processes punch from ZKTeco device or Mobile App
+  static Future<void> _punchChain = Future.value();
+
   static Future<void> processIncomingPunch({
     required String pin,
     required DateTime timestamp,
@@ -451,7 +455,34 @@ class ZkTecoNetworkService {
     required String source,
     bool enqueueForSync = true,
     bool broadcastLan = false,
+  }) {
+    // One punch at a time: the readers start a punch per log line without waiting, and two
+    // punches of one person read-modify-write the same day record.
+    final run = _punchChain.then((_) => _processIncomingPunchNow(
+          pin: pin,
+          timestamp: timestamp,
+          deviceIp: deviceIp,
+          deviceSn: deviceSn,
+          source: source,
+          enqueueForSync: enqueueForSync,
+          broadcastLan: broadcastLan,
+        ));
+    _punchChain = run.catchError((_) {});
+    return run;
+  }
+
+  static Future<void> _processIncomingPunchNow({
+    required String pin,
+    required DateTime timestamp,
+    required String deviceIp,
+    String deviceSn = '',
+    required String source,
+    bool enqueueForSync = true,
+    bool broadcastLan = false,
   }) async {
+    // The one place a device punch is marked as seen. The live-push and poll readers used to
+    // mark it before calling this, so this check then dropped every one of them (since
+    // 53e07aa): device punches were never recorded or uploaded.
     final dedupKey = buildCanonicalDedupKey(pin, timestamp, deviceIp);
     if (isPunchDuplicate(dedupKey, pin: pin, deviceIp: deviceIp, timestamp: timestamp)) {
       debugPrint('[ZkTecoNetworkService] Skipping duplicate/debounced punch for PIN $pin at $timestamp ($deviceIp)');
@@ -740,6 +771,13 @@ class ZkTecoNetworkService {
       final punches = (record['punches'] is List)
           ? List<dynamic>.from(record['punches'] as List)
           : <dynamic>[];
+      // A punch the record already holds (each poll re-reads the device's log): nothing
+      // changes and nothing is queued again. Re-applying it overwrote the check-out time.
+      final alreadyHeld = punches.any((p) {
+        final t = p is Map ? DateTime.tryParse(p['timestamp']?.toString() ?? '') : null;
+        return t != null && t.difference(punchTimestamp).inSeconds.abs() < 30;
+      });
+      if (alreadyHeld) return;
       punches.add({
         'time': timeStr,
         'timestamp': punchTimestamp.toIso8601String(),
@@ -797,28 +835,37 @@ class ZkTecoNetworkService {
       curShift['branchId'] = effectiveBranch;
       curShift['status'] = 'present';
 
-      if (curShift['checkInTime'] == null) {
-        curShift['checkInTime'] = timeStr;
-        curShift['arrivalTime'] = timeStr;
-        curShift['checkInTimestamp'] = punchTimestamp.toIso8601String();
-      } else {
-        curShift['checkOutTime'] = timeStr;
-        curShift['departureTime'] = timeStr;
-        curShift['checkOutTimestamp'] = punchTimestamp.toIso8601String();
+      // Check-in is the earliest punch, check-out the latest. Punches can arrive out of order
+      // (a poll catching up on missed ones after live punches): taking "first seen" as check-in
+      // and "last seen" as check-out turned an old morning punch into the day's check-out.
+      void applyPunch(Map<String, dynamic> m) {
+        final inAt = DateTime.tryParse(m['checkInTimestamp']?.toString() ?? '');
+        final outAt = DateTime.tryParse(m['checkOutTimestamp']?.toString() ?? '');
+        void setOut(Object? time, Object? at) {
+          m['checkOutTime'] = time;
+          m['departureTime'] = time;
+          m['checkOutTimestamp'] = at;
+        }
+        if (m['checkInTime'] == null || inAt == null) {
+          m['checkInTime'] = timeStr;
+          m['arrivalTime'] = timeStr;
+          m['checkInTimestamp'] = punchTimestamp.toIso8601String();
+        } else if (punchTimestamp.isBefore(inAt)) {
+          if (outAt == null) setOut(m['checkInTime'], m['checkInTimestamp']);
+          m['checkInTime'] = timeStr;
+          m['arrivalTime'] = timeStr;
+          m['checkInTimestamp'] = punchTimestamp.toIso8601String();
+        } else if (outAt == null || punchTimestamp.isAfter(outAt)) {
+          setOut(timeStr, punchTimestamp.toIso8601String());
+        }
       }
+
+      applyPunch(curShift);
       shifts[targetShiftKey] = curShift;
       record['shifts'] = shifts;
 
       // Keep first punch as checkIn and latest punch as checkOut for direct availability
-      if (record['checkInTime'] == null) {
-        record['checkInTime'] = timeStr;
-        record['arrivalTime'] = timeStr;
-        record['checkInTimestamp'] = punchTimestamp.toIso8601String();
-      } else {
-        record['checkOutTime'] = timeStr;
-        record['departureTime'] = timeStr;
-        record['checkOutTimestamp'] = punchTimestamp.toIso8601String();
-      }
+      applyPunch(record);
       record['status'] = 'present';
       record['synced'] = false;
       record['syncStatus'] = 'pending';
@@ -1872,8 +1919,20 @@ class ZkTecoNetworkService {
         // A full device log holds every punch since the device was installed (tens of
         // thousands of records). Dropping everything older than 24 h happens in a background
         // isolate; the parser below then only sees the recent records, in the same format.
-        final recent = await compute(keepRecentZkRecords, allData.toBytes());
+        // Only what is new since the last successful poll of this device (one day of overlap;
+        // the day record ignores punches it already holds). Re-reading 90 days every 5 minutes
+        // put the same punches through again all day. The first poll goes back 90 days, which
+        // also recovers punches that were never recorded.
+        final pollKey = 'zk_last_poll_$ip';
+        final flags = Hive.isBoxOpen('app_flags') ? Hive.box('app_flags') : null;
+        final lastPoll = DateTime.tryParse(flags?.get(pollKey)?.toString() ?? '');
+        final since = lastPoll != null
+            ? lastPoll.subtract(const Duration(days: 1))
+            : DateTime.now().subtract(const Duration(days: 90));
+        final pollStarted = DateTime.now();
+        final recent = await compute(keepZkRecordsSince, [allData.toBytes(), since.millisecondsSinceEpoch]);
         _parseZkAttendanceData(recent, ip, device.serialNumber);
+        await flags?.put(pollKey, pollStarted.toIso8601String());
       } else if (!receivedPrepare) {
         debugPrint('[ZkTecoNetworkService] No attendance data from $ip (may be empty or unsupported)');
       }
@@ -2013,7 +2072,6 @@ class ZkTecoNetworkService {
             if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp)) {
               continue;
             }
-            recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp);
             processIncomingPunch(
               pin: cleanPin,
               timestamp: timestamp,
@@ -2063,7 +2121,6 @@ class ZkTecoNetworkService {
               if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp)) {
                 continue;
               }
-              recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp);
               processIncomingPunch(
                 pin: cleanPin,
                 timestamp: timestamp,
@@ -2111,7 +2168,6 @@ class ZkTecoNetworkService {
             if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp)) {
               continue;
             }
-            recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp);
             processIncomingPunch(
               pin: cleanPin,
               timestamp: timestamp,
@@ -2195,9 +2251,15 @@ class ZkTecoNetworkService {
   /// Decodes ZKTeco encoded timestamp (seconds since 2000-01-01 00:00:00)
   /// Keeps records of a downloaded attendance log within the past 90 days.
   @visibleForTesting
-  static Uint8List keepRecentZkRecords(Uint8List data) {
+  /// [args]: the raw log bytes and the cutoff (ms since epoch); keeps records from then on.
+  static Uint8List keepZkRecordsSince(List<Object> args) =>
+      keepRecentZkRecords(args[0] as Uint8List, since: DateTime.fromMillisecondsSinceEpoch(args[1] as int));
+
+  static Uint8List keepRecentZkRecords(Uint8List data, {DateTime? since}) {
     if (data.isEmpty) return data;
-    bool recent(DateTime t) => DateTime.now().difference(t).inDays.abs() <= 90;
+    bool recent(DateTime t) => since != null
+        ? !t.isBefore(since) && t.isBefore(DateTime.now().add(const Duration(days: 1)))
+        : DateTime.now().difference(t).inDays.abs() <= 90;
 
     final textData = utf8.decode(data, allowMalformed: true);
     if (textData.contains('\t') || textData.contains('\n') || textData.contains(',')) {

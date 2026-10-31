@@ -630,14 +630,30 @@ class _DoctorScreenState extends State<DoctorScreen>
           }
         }
       }
-      final rawPresc = rawEntry['prescription'];
-      final prescription = (rawPresc is Map)
-          ? PatientHistoryPanel.unwrapPrescriptionData(Map<String, dynamic>.from(rawPresc))
-          : null;
-
       final docName = _username ?? widget.doctorName;
       final docId = widget.doctorId;
       final serial = (rawEntry['serial'] ?? rawEntry['id'])?.toString();
+
+      final rawPresc = rawEntry['prescription'];
+      var prescription = (rawPresc is Map)
+          ? PatientHistoryPanel.unwrapPrescriptionData(Map<String, dynamic>.from(rawPresc))
+          : null;
+
+      // If embedded prescription has no medicines, check local prescriptions box
+      final initialMeds = prescription != null
+          ? (prescription['prescriptions'] ?? prescription['medicines'] ?? prescription['items'])
+          : null;
+      if ((initialMeds is! List || initialMeds.isEmpty) && serial != null && serial.isNotEmpty) {
+        final localP = LocalStorageService.getLocalPrescription(
+          serial,
+          cnic: _selectedPatientData?['patientCnic']?.toString() ?? _selectedPatientData?['cnic']?.toString(),
+          patientName: _selectedPatientData?['patientName']?.toString() ?? _selectedPatientData?['name']?.toString(),
+          branchId: widget.branchId,
+        );
+        if (localP != null && localP.isNotEmpty) {
+          prescription = PatientHistoryPanel.unwrapPrescriptionData(localP);
+        }
+      }
 
       // Track consultation status locally and broadcast so other doctors see it
       if (serial != null && serial.isNotEmpty) {

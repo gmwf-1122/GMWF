@@ -5,10 +5,15 @@
 // token first), and which patient to load next. Used by the Dispenser's
 // PatientList and by the Hybrid Pharmacy tab so the two never disagree.
 
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
+import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/serials_service.dart';
@@ -190,12 +195,12 @@ class DispenseQueue {
         final exRx = target['prescription'];
         if (inRx is Map && inRx.isNotEmpty) {
           if (exRx is! Map || exRx.isEmpty) {
-            target['prescription'] = inRx;
+            target['prescription'] = LocalStorageService.prescriptionForEmbedding(inRx);
           } else {
             final inTime = DateTime.tryParse(inRx['updatedAt']?.toString() ?? inRx['completedAt']?.toString() ?? e['completedAt']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0;
             final exTime = DateTime.tryParse(exRx['updatedAt']?.toString() ?? exRx['completedAt']?.toString() ?? target['completedAt']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0;
             if (inTime >= exTime) {
-              target['prescription'] = inRx;
+              target['prescription'] = LocalStorageService.prescriptionForEmbedding(inRx);
             }
           }
         }
@@ -354,6 +359,122 @@ class DispenseQueue {
   static List<Map<String, dynamic>> activePending(List<Map<String, dynamic>> queue) =>
       queue.where((p) => !isDispensed(p) && !isOnHold(p)).toList();
 
+  /// Patients still to dispense, smallest token first whatever order [queue] is shown in.
+  /// The auto-load and the "only the smallest can be opened" lock follow this: with the
+  /// list sorted newest first they took the largest token and locked everything below it.
+  /// A token another desk is dispensing right now is left out (see [claim]).
+  static List<Map<String, dynamic>> pendingInTokenOrder(List<Map<String, dynamic>> queue) =>
+      activePending(queue).where((p) => !isClaimedByOtherDesk(p['serial'])).toList()
+        ..sort(compareTokens);
+
+  // ── Dispense claims ──────────────────────────────────────────────────────
+  // Every desk loads the smallest waiting token by itself, so two desks could open the same
+  // patient and both dispense them (medicines and stock given twice). The desk that opens a
+  // patient tells the others over the LAN; they skip that token while the claim lasts. When
+  // two desks open the same token at once, both keep the claim made first (then the smaller
+  // desk id), so they agree on the winner and the other moves to the next patient.
+  // Claims are live only: a desk that closes stops renewing and its claim lapses.
+
+  static const _claimTtl = Duration(seconds: 90);
+
+  /// How often the open form renews its claim (well inside [_claimTtl]).
+  static const claimRenewal = Duration(seconds: 30);
+
+  static final Map<String, _Claim> _claims = {};
+
+  /// Bumped whenever a token's claim changes hands or lapses; queue hosts re-pick on it.
+  static final ValueNotifier<int> claimsChanged = ValueNotifier(0);
+
+  static StreamSubscription<Map<String, dynamic>>? _claimSub;
+  static Timer? _claimSweep;
+
+  /// Starts following other desks' claims (once per app; safe to call again).
+  static void listenForClaims() {
+    _claimSub ??= RealtimeManager().messageStream.listen(_onClaimMessage);
+    _claimSweep ??= Timer.periodic(claimRenewal, (_) {
+      final before = _claims.length;
+      _claims.removeWhere((_, c) => c.lapsed);
+      if (_claims.length != before) claimsChanged.value++;
+    });
+  }
+
+  static String? get _myDesk {
+    final id = RealtimeManager().clientId;
+    return (id == null || id.isEmpty) ? null : id;
+  }
+
+  /// Whether another desk is dispensing this token now.
+  static bool isClaimedByOtherDesk(Object? serial) {
+    final c = _claims[(serial ?? '').toString().trim().toUpperCase()];
+    return c != null && !c.lapsed && c.desk != _myDesk;
+  }
+
+  /// This desk has opened [serial] to dispense: tell the other desks (also used to renew).
+  static void claim(String serial, String branchId, {String? deskName}) {
+    final me = _myDesk;
+    final s = serial.trim().toUpperCase();
+    if (me == null || s.isEmpty) return;
+    final held = _claims[s];
+    if (held != null && !held.lapsed && held.desk != me) return; // another desk was first
+    final at = held?.desk == me ? held!.at : DateTime.now().millisecondsSinceEpoch;
+    _claims[s] = _Claim(me, at);
+    RealtimeManager().sendLive(RealtimeEvents.payload(
+      type: 'dispense_claim',
+      branchId: branchId,
+      data: {'serial': s, 'desk': me, 'deskName': deskName, 'at': at},
+    ));
+  }
+
+  /// This desk closed [serial] (dispensed, or moved to another patient).
+  static void release(String serial, String branchId) {
+    final me = _myDesk;
+    final s = serial.trim().toUpperCase();
+    if (me == null || _claims[s]?.desk != me) return;
+    _claims.remove(s);
+    RealtimeManager().sendLive(RealtimeEvents.payload(
+      type: 'dispense_release',
+      branchId: branchId,
+      data: {'serial': s, 'desk': me},
+    ));
+  }
+
+  static void _onClaimMessage(Map<String, dynamic> event) {
+    final type = event['event_type'];
+    if (type != 'dispense_claim' && type != 'dispense_release') return;
+    final decoded = event['decoded'];
+    if (decoded is Map &&
+        (decoded['_serverPush'] == true || decoded['isCatchUp'] == true || decoded['_isReplay'] == true)) {
+      return;
+    }
+    final data = event['data'];
+    if (data is! Map) return;
+    final s = (data['serial'] ?? '').toString().trim().toUpperCase();
+    final desk = (data['desk'] ?? '').toString();
+    if (s.isEmpty || desk.isEmpty || desk == _myDesk) return;
+
+    final held = _claims[s];
+    if (type == 'dispense_release') {
+      if (held?.desk == desk) {
+        _claims.remove(s);
+        claimsChanged.value++;
+      }
+      return;
+    }
+    final incoming = _Claim(desk, (data['at'] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch);
+    if (held == null || held.lapsed || held.desk == desk || incoming.isBefore(held)) {
+      final changedHands = held == null || held.lapsed || held.desk != desk;
+      _claims[s] = held?.desk == desk ? _Claim(desk, held!.at) : incoming;
+      if (changedHands) claimsChanged.value++;
+    }
+  }
+
+  /// Same token, whatever the casing. A prescription from the doctor re-wrote the entry's
+  /// serial in lower case, so an exact compare took the open patient as gone and switched.
+  static bool sameSerial(Object? a, Object? b) {
+    final x = (a ?? '').toString().trim().toUpperCase();
+    return x.isNotEmpty && x == (b ?? '').toString().trim().toUpperCase();
+  }
+
   /// Who the dispense form should show: keeps [currentSerial] while it is still
   /// waiting (never switches away mid-dispense), otherwise the next in line;
   /// null when nobody is waiting. [skipSerial] is left out (e.g. the patient just
@@ -364,16 +485,33 @@ class DispenseQueue {
     String? skipSerial,
   }) {
     final skip = skipSerial?.trim().toUpperCase() ?? '';
-    final pending = activePending(queue)
-        .where((p) => skip.isEmpty || (p['serial']?.toString().trim().toUpperCase() ?? '') != skip)
+    final pending = pendingInTokenOrder(queue)
+        .where((p) => skip.isEmpty || !sameSerial(p['serial'], skip))
         .toList();
     if (pending.isEmpty) return null;
     final cur = currentSerial?.trim() ?? '';
     if (cur.isNotEmpty) {
       for (final p in pending) {
-        if ((p['serial']?.toString() ?? '') == cur) return p;
+        if (sameSerial(p['serial'], cur)) return p;
       }
     }
     return pending.first;
   }
+}
+
+class _Claim {
+  _Claim(this.desk, this.at) : seenAt = DateTime.now();
+
+  /// The claiming desk's LAN client id.
+  final String desk;
+
+  /// When that desk opened the patient (its clock); the earlier claim wins.
+  final int at;
+
+  /// When this desk last heard of it; the claim lapses [DispenseQueue._claimTtl] later.
+  final DateTime seenAt;
+
+  bool get lapsed => DateTime.now().difference(seenAt) > DispenseQueue._claimTtl;
+
+  bool isBefore(_Claim other) => at != other.at ? at < other.at : desk.compareTo(other.desk) < 0;
 }

@@ -18,9 +18,27 @@ class ThemeValueNotifier extends ValueNotifier<bool> {
 class UserThemeService {
   static final ThemeValueNotifier currentThemeNotifier = ThemeValueNotifier(false);
 
+  /// Initializes and synchronizes current theme notifier and Hive box keys.
+  static void init([String? explicitUserKey]) {
+    try {
+      final isDark = isDarkMode(explicitUserKey);
+      currentThemeNotifier.value = isDark;
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        box.put('is_dark_mode', isDark);
+      }
+    } catch (_) {}
+  }
+
   /// Notifies all active theme listeners that custom accent color or theme settings changed
   static void notifyThemeChanged() {
-    currentThemeNotifier.value = isDarkMode();
+    final isDark = isDarkMode();
+    currentThemeNotifier.value = isDark;
+    if (Hive.isBoxOpen('app_settings')) {
+      try {
+        Hive.box('app_settings').put('is_dark_mode', isDark);
+      } catch (_) {}
+    }
     currentThemeNotifier.notifyTheme();
   }
 
@@ -77,6 +95,10 @@ class UserThemeService {
         if (keyedValue is bool) {
           return keyedValue;
         }
+        final fallback = box.get('is_dark_mode');
+        if (fallback is bool) {
+          return fallback;
+        }
       }
     } catch (_) {}
     return false;
@@ -89,8 +111,10 @@ class UserThemeService {
         final box = Hive.box('app_settings');
         final userKey = getStorageKey(explicitUserKey);
         await box.put(userKey, isDark);
+        await box.put('is_dark_mode', isDark);
       }
       currentThemeNotifier.value = isDark;
+      currentThemeNotifier.notifyTheme();
 
       // Sync to Firestore user profile in background if available
       final user = FirebaseAuth.instance.currentUser;
@@ -116,6 +140,6 @@ class UserThemeService {
   /// Returns a ValueListenable that fires when the user's theme setting changes.
   static ValueListenable<Box> listenable([String? explicitUserKey]) {
     final key = getStorageKey(explicitUserKey);
-    return Hive.box('app_settings').listenable(keys: [key]);
+    return Hive.box('app_settings').listenable(keys: [key, 'is_dark_mode']);
   }
 }

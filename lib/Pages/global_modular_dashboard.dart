@@ -3,13 +3,12 @@
 
 import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:flutter/material.dart';
-import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 import 'package:lottie/lottie.dart';
 
 import '../models/module_registry.dart';
@@ -89,17 +88,25 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
 
   Map<String, dynamic> _resolveFreshUserData() {
     final data = Map<String, dynamic>.from(widget.userData);
+    // A saved copy may hold a stand-in name ("Staff User", the role): it must not replace the
+    // real name the login gave, or the header shows the stand-in.
+    void merge(Map source) {
+      for (final k in source.keys) {
+        final v = source[k];
+        if (v == null || v == '' || v == 'null') continue;
+        final key = k.toString();
+        if ((key == 'name' || key == 'displayName' || key == 'fullName') &&
+            isStandInUserName(v.toString()) &&
+            !isStandInUserName(data[key]?.toString())) {
+          continue;
+        }
+        data[key] = v;
+      }
+    }
     try {
       if (Hive.isBoxOpen('app_settings')) {
         final cached = Hive.box('app_settings').get('user_data');
-        if (cached is Map) {
-          for (final k in cached.keys) {
-            final v = cached[k];
-            if (v != null && v != '' && v != 'null') {
-              data[k.toString()] = v;
-            }
-          }
-        }
+        if (cached is Map) merge(cached);
       }
     } catch (_) {}
 
@@ -109,21 +116,11 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     // Fast O(1) keyed lookups only — NEVER do full box scans during build/getters
     if (uid != null && uid.isNotEmpty) {
       final local = LocalStorageService.getLocalUserByUid(uid);
-      if (local != null) {
-        for (final k in local.keys) {
-          final v = local[k];
-          if (v != null && v != '' && v != 'null') data[k] = v;
-        }
-      }
+      if (local != null) merge(local);
     }
     if (email.isNotEmpty) {
       final local = LocalStorageService.getLocalUserByEmail(email);
-      if (local != null) {
-        for (final k in local.keys) {
-          final v = local[k];
-          if (v != null && v != '' && v != 'null') data[k] = v;
-        }
-      }
+      if (local != null) merge(local);
     }
     return data;
   }
@@ -319,6 +316,8 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
                 setState(() {
                   if (pImg != null && pImg.isNotEmpty) widget.userData['profileImage'] = pImg;
                   if (name.isNotEmpty) widget.userData['name'] = name;
+                  // The header reads the cached name; it kept showing the old one until restart.
+                  _updateCachedUserData();
                 });
                 unawaited(LocalStorageService.saveLocalUser(widget.userData));
               }
@@ -335,14 +334,7 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
       ['ceo', 'chairman', 'global user'].contains(_role);
 
   /// Whether the user has toggled dark mode in Settings.
-  bool get _userDarkMode {
-    try {
-      if (Hive.isBoxOpen('app_settings')) {
-        return Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true;
-      }
-    } catch (_) {}
-    return false;
-  }
+  bool get _userDarkMode => UserThemeService.isDarkMode();
 
   /// True when the dashboard should render in dark canvas mode.
   bool get _isDark => _userDarkMode;
@@ -643,33 +635,42 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
       return buildBody(null, false);
     }
 
-    return ValueListenableBuilder(
-      valueListenable: Hive.box('app_settings').listenable(keys: ['custom_accent_color', 'is_dark_mode']),
-      builder: (context, Box box, child) {
-        Color? customColor;
-        
-        // 1. Try local settings override first
-        final localHex = box.get('custom_accent_color') as String?;
-        if (localHex != null && localHex.isNotEmpty) {
-          try {
-            final hex = localHex.replaceAll('#', '');
-            customColor = Color(int.parse('FF$hex', radix: 16));
-          } catch (_) {}
-        }
-        
-        // 2. Fallback to user metadata preference
-        if (customColor == null) {
-          final prefColorStr = widget.userData['preferredColor'] as String?;
-          if (prefColorStr != null && prefColorStr.isNotEmpty) {
-            try {
-              final hex = prefColorStr.replaceAll('#', '');
-              customColor = Color(int.parse('FF$hex', radix: 16));
-            } catch (_) {}
-          }
-        }
+    return ValueListenableBuilder<bool>(
+      valueListenable: UserThemeService.currentThemeNotifier,
+      builder: (context, themeVal, child) {
+        return ValueListenableBuilder(
+          valueListenable: Hive.box('app_settings').listenable(keys: [
+            'custom_accent_color',
+            'is_dark_mode',
+            UserThemeService.getStorageKey(),
+          ]),
+          builder: (context, Box box, child) {
+            Color? customColor;
+            
+            // 1. Try local settings override first
+            final localHex = box.get('custom_accent_color') as String?;
+            if (localHex != null && localHex.isNotEmpty) {
+              try {
+                final hex = localHex.replaceAll('#', '');
+                customColor = Color(int.parse('FF$hex', radix: 16));
+              } catch (_) {}
+            }
+            
+            // 2. Fallback to user metadata preference
+            if (customColor == null) {
+              final prefColorStr = widget.userData['preferredColor'] as String?;
+              if (prefColorStr != null && prefColorStr.isNotEmpty) {
+                try {
+                  final hex = prefColorStr.replaceAll('#', '');
+                  customColor = Color(int.parse('FF$hex', radix: 16));
+                } catch (_) {}
+              }
+            }
 
-        final isDark = box.get('is_dark_mode', defaultValue: false) == true;
-        return buildBody(customColor, isDark);
+            final isDark = UserThemeService.isDarkMode();
+            return buildBody(customColor, isDark);
+          },
+        );
       },
     );
   }
@@ -758,7 +759,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
   @override
   Widget build(BuildContext context) {
     final navIndex = widget.state._supervisorNavIndex;
-    final isDark = widget.state._isDark;
+    final isDark = widget.t.isDarkCanvas || widget.state._isDark;
     final t = widget.t;
     final branchName = widget.state._branchId.toUpperCase();
     final userName = widget.state._userName;
@@ -1570,7 +1571,7 @@ class _Sidebar extends StatelessWidget {
   final RoleThemeData t;
   const _Sidebar({required this.state, required this.t});
 
-  bool get _dark => state._isDark;
+  bool get _dark => t.isDarkCanvas || state._isDark;
   Color get _divider => _dark ? SoftPalette.gray50.withValues(alpha: 0.10) : t.accent.withValues(alpha: 0.15);
   Color get _muted => _dark ? SoftPalette.slate350 : SoftPalette.slate550;
 
@@ -2847,7 +2848,7 @@ class _HeroHeader extends StatelessWidget {
   final bool isDesktop;
   const _HeroHeader({required this.state, required this.t, required this.isDesktop});
 
-  bool get _dark => state._isDark;
+  bool get _dark => t.isDarkCanvas || state._isDark;
 
   @override
   Widget build(BuildContext context) {
@@ -2924,7 +2925,7 @@ Widget _buildProfileHeroCard({
   final String userRole = state._role.toUpperCase();
 
   final greetingBadgeText = userRole.isNotEmpty
-      ? '$timeEmoji GOOD $timeOfDayUpper, MR. $userRole'
+      ? '$timeEmoji GOOD $timeOfDayUpper • $userRole'
       : '$timeEmoji GOOD $timeOfDayUpper';
 
   final avatarSize = isDesktop ? 76.0 : 64.0;
@@ -2971,89 +2972,87 @@ Widget _buildProfileHeroCard({
     child: ClipRRect(
       borderRadius: BorderRadius.circular(28.0),
       child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28.0),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: isDark
-                  ? [
-                      SoftPalette.slate800.withValues(alpha: 0.90),
-                      SoftPalette.slate900.withValues(alpha: 0.82),
-                    ]
-                  : [
-                      SoftPalette.yellow50m.withValues(alpha: 0.98),
-                      SoftPalette.gray50.withValues(alpha: 0.94),
-                      SoftPalette.gray50.withValues(alpha: 0.98),
-                    ],
-            ),
-            border: Border.all(
-              color: isDark
-                  ? SoftPalette.gray50.withValues(alpha: 0.16)
-                  : SoftPalette.amber300.withValues(alpha: 0.25),
-              width: 1.2,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: SoftPalette.amber300.withValues(alpha: isDark ? 0.25 : 0.08),
-                blurRadius: 20,
-                offset: const Offset(0, 6),
-              ),
-              BoxShadow(
-                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.03),
-                blurRadius: 10,
-                offset: const Offset(0, 2),
-              ),
-            ],
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(28.0),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: isDark
+                ? [
+                    SoftPalette.slate800.withValues(alpha: 0.90),
+                    SoftPalette.slate900.withValues(alpha: 0.82),
+                  ]
+                : [
+                    SoftPalette.yellow50m.withValues(alpha: 0.98),
+                    SoftPalette.gray50.withValues(alpha: 0.94),
+                    SoftPalette.gray50.withValues(alpha: 0.98),
+                  ],
           ),
-          child: Stack(
-            children: [
-              // Ambient Radial Glow Spot (Top-Left behind greeting/avatar)
-              Positioned(
-                top: -50,
-                left: -50,
-                width: 240,
-                height: 240,
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          SoftPalette.amber300.withValues(alpha: isDark ? 0.35 : 0.18),
-                          primaryThemeColor.withValues(alpha: 0.0),
-                        ],
-                      ),
+          border: Border.all(
+            color: isDark
+                ? SoftPalette.gray50.withValues(alpha: 0.16)
+                : SoftPalette.amber300.withValues(alpha: 0.25),
+            width: 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: SoftPalette.amber300.withValues(alpha: isDark ? 0.25 : 0.08),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+            BoxShadow(
+              color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.03),
+              blurRadius: 10,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Ambient Radial Glow Spot (Top-Left behind greeting/avatar)
+            Positioned(
+              top: -50,
+              left: -50,
+              width: 240,
+              height: 240,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        SoftPalette.amber300.withValues(alpha: isDark ? 0.35 : 0.18),
+                        primaryThemeColor.withValues(alpha: 0.0),
+                      ],
                     ),
                   ),
                 ),
               ),
+            ),
 
-              // Ambient Radial Glow Spot (Top-Right sky-blue accent glow)
-              Positioned(
-                top: -40,
-                right: 40,
-                width: 220,
-                height: 220,
-                child: IgnorePointer(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: RadialGradient(
-                        colors: [
-                          SoftPalette.sky400.withValues(alpha: isDark ? 0.22 : 0.12),
-                          SoftPalette.sky400.withValues(alpha: 0.0),
-                        ],
-                      ),
+            // Ambient Radial Glow Spot (Top-Right sky-blue accent glow)
+            Positioned(
+              top: -40,
+              right: 40,
+              width: 220,
+              height: 220,
+              child: IgnorePointer(
+                child: Container(
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        SoftPalette.sky400.withValues(alpha: isDark ? 0.22 : 0.12),
+                        SoftPalette.sky400.withValues(alpha: 0.0),
+                      ],
                     ),
                   ),
                 ),
               ),
+            ),
 
-              // Seamlessly Dissolved Islamic Pattern Watermark on Right
-              // (skipped entirely when patterns are off: a ShaderMask+Opacity over an empty box
-              // still costs offscreen layers every frame)
-              if (GDecor.patternsEnabled)
+            // Seamlessly Dissolved Islamic Pattern Watermark on Right
+            if (GDecor.patternsEnabled)
               Positioned(
                 right: -20,
                 top: -20,
@@ -3088,257 +3087,257 @@ Widget _buildProfileHeroCard({
                 ),
               ),
 
-              // Hero Content
-              Padding(
-                padding: EdgeInsets.all(isDesktop ? 24 : 18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Main Left Column: Greeting, Avatar, User Info & Metadata Badges
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Top Greeting Badge Pill
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: SoftPalette.amber300.withValues(alpha: isDark ? 0.18 : 0.10),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: SoftPalette.amber300.withValues(alpha: isDark ? 0.45 : 0.35),
-                                width: 1.0,
+            // Hero Content
+            Padding(
+              padding: EdgeInsets.all(isDesktop ? 24 : 18),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  // Main Left Column: Greeting, Avatar, User Info & Metadata Badges
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Top Greeting Badge Pill
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: SoftPalette.amber300.withValues(alpha: isDark ? 0.18 : 0.10),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: SoftPalette.amber300.withValues(alpha: isDark ? 0.45 : 0.35),
+                              width: 1.0,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: SoftPalette.amber300.withValues(alpha: isDark ? 0.20 : 0.08),
+                                blurRadius: 8,
+                                offset: const Offset(0, 2),
                               ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: SoftPalette.amber300.withValues(alpha: isDark ? 0.20 : 0.08),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  greetingBadgeText,
-                                  style: TextStyle(
-                                    color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.3,
-                                  ),
-                                ),
-                              ],
-                            ),
+                            ],
                           ),
-                          const SizedBox(height: 16),
-
-                          // Profile Avatar, User Name & Date Row
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              // Interactive Avatar with Luxury Gold Halo & Online Indicator
-                              MouseRegion(
-                                cursor: SystemMouseCursors.click,
-                                child: GestureDetector(
-                                  onTap: () => _showEnlargedAvatarDialog(state.context, state, t),
-                                  child: Tooltip(
-                                    message: 'Tap to view, change or remove profile picture',
-                                    child: Stack(
-                                      clipBehavior: Clip.none,
-                                      children: [
-                                        Container(
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            gradient: const LinearGradient(
-                                              begin: Alignment.topLeft,
-                                              end: Alignment.bottomRight,
-                                              colors: [
-                                                SoftPalette.amber200,
-                                                SoftPalette.orange400,
-                                              ],
-                                            ),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: SoftPalette.amber300.withValues(alpha: 0.40),
-                                                blurRadius: 12,
-                                                spreadRadius: 1,
-                                              ),
-                                            ],
-                                          ),
-                                          padding: const EdgeInsets.all(2.5),
-                                          child: ClipOval(
-                                            child: _buildUserHeroAvatar(userPhotoUrl, userName, t, size: avatarSize),
-                                          ),
-                                        ),
-                                        Positioned(
-                                          right: 2,
-                                          bottom: 2,
-                                          child: Container(
-                                            width: 15,
-                                            height: 15,
-                                            decoration: BoxDecoration(
-                                              color: SoftPalette.emerald350,
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
-                                                width: 2.0,
-                                              ),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: SoftPalette.emerald350.withValues(alpha: 0.6),
-                                                  blurRadius: 6,
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 18),
-                              // User Display Name & Date Subtitle
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      userName,
-                                      style: TextStyle(
-                                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
-                                        fontSize: isDesktop ? 24 : 19,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: -0.3,
-                                        height: 1.15,
-                                      ),
-                                      softWrap: true,
-                                      maxLines: 2,
-                                    ),
-                                    const SizedBox(height: 5),
-                                    Row(
-                                      children: [
-                                        Icon(
-                                          Icons.calendar_today_outlined,
-                                          size: 13,
-                                          color: isDark
-                                              ? SoftPalette.slate350
-                                              : SoftPalette.slate550,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          dateStr,
-                                          style: TextStyle(
-                                            color: isDark
-                                                ? SoftPalette.slate350
-                                                : SoftPalette.slate550,
-                                            fontSize: 12.5,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
+                              Text(
+                                greetingBadgeText,
+                                style: TextStyle(
+                                  color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.3,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 18),
+                        ),
+                        const SizedBox(height: 16),
 
-                          // Bottom Metadata Badges Row (Strict Single-Line on Mobile)
-                          FittedBox(
-                            alignment: Alignment.centerLeft,
-                            fit: BoxFit.scaleDown,
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
+                        // Profile Avatar, User Name & Date Row
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            // Interactive Avatar with Luxury Gold Halo & Online Indicator
+                            MouseRegion(
+                              cursor: SystemMouseCursors.click,
+                              child: GestureDetector(
+                                onTap: () => _showEnlargedAvatarDialog(state.context, state, t),
+                                child: Tooltip(
+                                  message: 'Tap to view, change or remove profile picture',
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Container(
+                                        decoration: BoxDecoration(
+                                          shape: BoxShape.circle,
+                                          gradient: const LinearGradient(
+                                            begin: Alignment.topLeft,
+                                            end: Alignment.bottomRight,
+                                            colors: [
+                                              SoftPalette.amber200,
+                                              SoftPalette.orange400,
+                                            ],
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: SoftPalette.amber300.withValues(alpha: 0.40),
+                                              blurRadius: 12,
+                                              spreadRadius: 1,
+                                            ),
+                                          ],
+                                        ),
+                                        padding: const EdgeInsets.all(2.5),
+                                        child: ClipOval(
+                                          child: _buildUserHeroAvatar(userPhotoUrl, userName, t, size: avatarSize),
+                                        ),
+                                      ),
+                                      Positioned(
+                                        right: 2,
+                                        bottom: 2,
+                                        child: Container(
+                                          width: 15,
+                                          height: 15,
+                                          decoration: BoxDecoration(
+                                            color: SoftPalette.emerald350,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+                                              width: 2.0,
+                                            ),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: SoftPalette.emerald350.withValues(alpha: 0.6),
+                                                blurRadius: 6,
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 18),
+                            // User Display Name & Date Subtitle
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    userName,
+                                    style: TextStyle(
+                                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
+                                      fontSize: isDesktop ? 24 : 19,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: -0.3,
+                                      height: 1.15,
+                                    ),
+                                    softWrap: true,
+                                    maxLines: 2,
+                                  ),
+                                  const SizedBox(height: 5),
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.calendar_today_outlined,
+                                        size: 13,
+                                        color: isDark
+                                            ? SoftPalette.slate350
+                                            : SoftPalette.slate550,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        dateStr,
+                                        style: TextStyle(
+                                          color: isDark
+                                              ? SoftPalette.slate350
+                                              : SoftPalette.slate550,
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+
+                        // Bottom Metadata Badges Row (Strict Single-Line on Mobile)
+                        FittedBox(
+                          alignment: Alignment.centerLeft,
+                          fit: BoxFit.scaleDown,
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              _ExecutiveGlassPill(
+                                label: userRole,
+                                icon: (isChairman || isCeo)
+                                    ? Icons.workspace_premium_rounded
+                                    : Icons.shield_outlined,
+                                accentColor: SoftPalette.amber300,
+                                isDark: isDark,
+                                isCompact: !isDesktop,
+                              ),
+                              SizedBox(width: isDesktop ? 8 : 5),
+                              _ExecutiveGlassPill(
+                                label: '${state._availableModules.length} Modules',
+                                icon: Icons.grid_view_rounded,
+                                accentColor: SoftPalette.indigo500,
+                                isDark: isDark,
+                                isCompact: !isDesktop,
+                              ),
+                              if (state._isSupervisor) ...[
+                                if ((state.widget.userData['branchId'] ?? '').toString().isNotEmpty) ...[
+                                  SizedBox(width: isDesktop ? 8 : 5),
+                                  _ExecutiveGlassPill(
+                                    label: (state.widget.userData['branchId'] ?? '').toString().toUpperCase(),
+                                    icon: Icons.storefront_rounded,
+                                    accentColor: SoftPalette.emerald350,
+                                    isDark: isDark,
+                                    isCompact: !isDesktop,
+                                  ),
+                                ],
+                              ] else ...[
+                                SizedBox(width: isDesktop ? 8 : 5),
                                 _ExecutiveGlassPill(
-                                  label: userRole,
-                                  icon: (isChairman || isCeo)
-                                      ? Icons.workspace_premium_rounded
-                                      : Icons.shield_outlined,
-                                  accentColor: SoftPalette.amber300,
+                                  label: 'Global Access',
+                                  icon: Icons.public_rounded,
+                                  accentColor: SoftPalette.sky400,
                                   isDark: isDark,
                                   isCompact: !isDesktop,
                                 ),
                                 SizedBox(width: isDesktop ? 8 : 5),
                                 _ExecutiveGlassPill(
-                                  label: '${state._availableModules.length} Modules',
-                                  icon: Icons.grid_view_rounded,
-                                  accentColor: SoftPalette.indigo500,
+                                  label: 'Live Network',
+                                  icon: Icons.sensors_rounded,
+                                  accentColor: SoftPalette.emerald350,
                                   isDark: isDark,
+                                  isPulse: true,
                                   isCompact: !isDesktop,
                                 ),
-                                if (state._isSupervisor) ...[
-                                  if ((state.widget.userData['branchId'] ?? '').toString().isNotEmpty) ...[
-                                    SizedBox(width: isDesktop ? 8 : 5),
-                                    _ExecutiveGlassPill(
-                                      label: (state.widget.userData['branchId'] ?? '').toString().toUpperCase(),
-                                      icon: Icons.storefront_rounded,
-                                      accentColor: SoftPalette.emerald350,
-                                      isDark: isDark,
-                                      isCompact: !isDesktop,
-                                    ),
-                                  ],
-                                ] else ...[
-                                  SizedBox(width: isDesktop ? 8 : 5),
-                                  _ExecutiveGlassPill(
-                                    label: 'Global Access',
-                                    icon: Icons.public_rounded,
-                                    accentColor: SoftPalette.sky400,
-                                    isDark: isDark,
-                                    isCompact: !isDesktop,
-                                  ),
-                                  SizedBox(width: isDesktop ? 8 : 5),
-                                  _ExecutiveGlassPill(
-                                    label: 'Live Network',
-                                    icon: Icons.sensors_rounded,
-                                    accentColor: SoftPalette.emerald350,
-                                    isDark: isDark,
-                                    isPulse: true,
-                                    isCompact: !isDesktop,
-                                  ),
-                                ],
                               ],
-                            ),
+                            ],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
+                  ),
 
-                    // Right Column on Desktop: Seamless Dashboard Animation with In-Engine Theming
-                    if (isDesktop)
-                      Padding(
-                        padding: const EdgeInsets.only(left: 16, right: 8),
-                        child: Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            // Subtle contextual ambient aura behind animation
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    gradient: RadialGradient(
-                                      colors: [
-                                        (isDark
-                                                ? SoftPalette.sky400
-                                                : SoftPalette.amber300)
-                                            .withValues(alpha: isDark ? 0.18 : 0.10),
-                                        Colors.transparent,
-                                      ],
-                                      radius: 0.75,
-                                    ),
+                  // Right Column on Desktop: Seamless Dashboard Animation with In-Engine Theming
+                  if (isDesktop)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 16, right: 8),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Subtle contextual ambient aura behind animation
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  gradient: RadialGradient(
+                                    colors: [
+                                      (isDark
+                                              ? SoftPalette.sky400
+                                              : SoftPalette.amber300)
+                                          .withValues(alpha: isDark ? 0.18 : 0.10),
+                                      Colors.transparent,
+                                    ],
+                                    radius: 0.75,
                                   ),
                                 ),
                               ),
                             ),
-                            SizedBox(
-                              width: 290,
-                              height: 220,
-                              child: RepaintBoundary(
+                          ),
+                          SizedBox(
+                            width: 290,
+                            height: 220,
+                            child: RepaintBoundary(
                               child: ColorFiltered(
                                 colorFilter: isDark
                                     ? const ColorFilter.matrix(<double>[
@@ -3356,7 +3355,6 @@ Widget _buildProfileHeroCard({
                                 child: Lottie.asset(
                                   'assets/animations/dashboard.json',
                                   fit: BoxFit.contain,
-                                  // Reduce motion: play once and rest on the last frame instead of looping forever.
                                   repeat: !GDecor.reduceMotion,
                                   errorBuilder: (context, error, stackTrace) => Icon(
                                     Icons.dashboard_customize_rounded,
@@ -3367,18 +3365,18 @@ Widget _buildProfileHeroCard({
                                   ),
                                 ),
                               ),
-                              ),
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
+    ),
   );
 }
 
@@ -3500,6 +3498,8 @@ class _ExecutiveGlassPillState extends State<_ExecutiveGlassPill> {
   }
 }
 
+
+
 Future<void> _showEnlargedAvatarDialog(
   BuildContext context,
   _GlobalModularDashboardState state,
@@ -3508,247 +3508,665 @@ Future<void> _showEnlargedAvatarDialog(
   final userName = state._userName;
   final userRole = state._role.toUpperCase();
 
-  final userData = state.widget.userData;
-  final lastUpdatedByName = (userData['photoUpdatedByName'] as String?) ?? '';
-  final rawTime = userData['photoUpdatedAt'];
-  final lastUpdatedTime = (rawTime != null)
-      ? (rawTime is Timestamp
-          ? rawTime.toDate().toLocal().toString().split('.')[0]
-          : rawTime.toString())
-      : '';
-
-  showDialog(
+  await showDialog(
     context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.65),
     builder: (dialogCtx) => StatefulBuilder(
       builder: (context, setDialogState) {
         final currentPhoto = state._userPhotoUrl;
         final hasPhoto = currentPhoto.trim().isNotEmpty;
+        final userData = state.widget.userData;
+
+        // Adaptive Dark/Light Mode Detection
+        final isDark = UserThemeService.isDarkMode() ||
+            Theme.of(context).brightness == Brightness.dark ||
+            t.isDarkCanvas;
+
+        // Solid executive palette tokens (zero translucency / zero glassmorphic slop)
+        final cardBgColor = isDark ? const Color(0xFF18181B) : Colors.white;
+        final cardBorderColor = isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0);
+        final textPrimaryColor = isDark ? Colors.white : const Color(0xFF0F172A);
+        final textSecondaryColor = isDark ? const Color(0xFFA1A1AA) : const Color(0xFF64748B);
+        final innerSpacerColor = isDark ? const Color(0xFF18181B) : Colors.white;
+        final surfaceCardColor = isDark ? const Color(0xFF27272A) : const Color(0xFFF8FAFC);
+
+
+        // Dynamic audit information
+        final lastUpdatedByName = (userData['photoUpdatedByName'] as String?) ?? '';
+        final rawTime = userData['photoUpdatedAt'];
+
+        DateTime? parsedAuditDate;
+        if (rawTime is Timestamp) {
+          parsedAuditDate = rawTime.toDate().toLocal();
+        } else if (rawTime is DateTime) {
+          parsedAuditDate = rawTime.toLocal();
+        } else if (rawTime is int) {
+          parsedAuditDate = DateTime.fromMillisecondsSinceEpoch(rawTime).toLocal();
+        } else if (rawTime is String && rawTime.trim().isNotEmpty) {
+          parsedAuditDate = DateTime.tryParse(rawTime.trim())?.toLocal();
+        }
+
+        String formattedDate = '';
+        String relativeTime = '';
+        if (parsedAuditDate != null) {
+          try {
+            formattedDate = DateFormat('dd MMM yyyy • hh:mm a').format(parsedAuditDate);
+            final diff = DateTime.now().difference(parsedAuditDate);
+            if (diff.inSeconds < 60) {
+              relativeTime = 'Just now';
+            } else if (diff.inMinutes < 60) {
+              relativeTime = '${diff.inMinutes}m ago';
+            } else if (diff.inHours < 24) {
+              relativeTime = '${diff.inHours}h ago';
+            } else if (diff.inDays < 7) {
+              relativeTime = '${diff.inDays}d ago';
+            } else if (diff.inDays < 30) {
+              final weeks = (diff.inDays / 7).floor();
+              relativeTime = '${weeks}w ago';
+            } else {
+              final months = (diff.inDays / 30).floor();
+              relativeTime = '${months}mo ago';
+            }
+          } catch (_) {
+            formattedDate = parsedAuditDate.toString().split('.')[0];
+          }
+        }
+
+        final branchRaw = (userData['branchName'] ?? userData['branch'] ?? userData['branchId'] ?? '').toString().trim();
+        final branchDisplay = (branchRaw.isNotEmpty &&
+                branchRaw.toLowerCase() != 'null' &&
+                branchRaw.toLowerCase() != 'all' &&
+                branchRaw.toLowerCase() != 'unknown')
+            ? branchRaw.toUpperCase()
+            : '';
+        final userEmail = (userData['email'] ?? FirebaseAuth.instance.currentUser?.email ?? '').toString().trim();
+
+        Future<void> handlePickPhoto() async {
+          final source = await ImageUploadService.showSourceDialog(
+            context,
+            title: 'Choose Profile Photo Source',
+          );
+          if (source == null) return;
+
+          final newBase64 = await ImageUploadService.pickAndProcessImage(
+            source: source,
+            maxWidth: 512,
+            maxHeight: 512,
+          );
+          if (newBase64 == null || newBase64.isEmpty) return;
+
+          await _updateUserProfilePhoto(
+            state: state,
+            newBase64: newBase64,
+            action: 'PHOTO_CHANGED',
+          );
+
+          setDialogState(() {});
+          if (dialogCtx.mounted) {
+            AppToast.showSnackBar(
+              context,
+              const SnackBar(
+                content: Text('✅ Profile photo updated successfully!'),
+                backgroundColor: SoftPalette.green400,
+              ),
+            );
+          }
+        }
+
+        Future<void> handleRemovePhoto() async {
+          final confirm = await showDialog<bool>(
+            context: context,
+            builder: (confirmCtx) => AlertDialog(
+              backgroundColor: cardBgColor,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: BorderSide(color: cardBorderColor),
+              ),
+              icon: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF271318) : const Color(0xFFFFF1F2),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.3)),
+                ),
+                child: const Icon(Icons.delete_forever_rounded, color: SoftPalette.red400, size: 26),
+              ),
+              title: Text(
+                'Remove Profile Photo?',
+                style: TextStyle(color: textPrimaryColor, fontWeight: FontWeight.w700, fontSize: 18),
+                textAlign: TextAlign.center,
+              ),
+              content: Text(
+                'Are you sure you want to remove your custom profile photo? Monogram initials will be displayed instead.',
+                style: TextStyle(color: textSecondaryColor, fontSize: 13, height: 1.4),
+                textAlign: TextAlign.center,
+              ),
+              actionsAlignment: MainAxisAlignment.center,
+              actionsPadding: const EdgeInsets.only(bottom: 20, left: 20, right: 20),
+              actions: [
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(confirmCtx, false),
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(color: cardBorderColor),
+                    foregroundColor: textSecondaryColor,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('Cancel'),
+                ),
+                const SizedBox(width: 10),
+                ElevatedButton(
+                  onPressed: () => Navigator.pop(confirmCtx, true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: SoftPalette.red400,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    elevation: 0,
+                  ),
+                  child: const Text('Remove Photo', style: TextStyle(fontWeight: FontWeight.w700)),
+                ),
+              ],
+            ),
+          );
+
+          if (confirm != true) return;
+
+          await _updateUserProfilePhoto(
+            state: state,
+            newBase64: '',
+            action: 'PHOTO_REMOVED',
+          );
+
+          setDialogState(() {});
+          if (dialogCtx.mounted) {
+            AppToast.showSnackBar(
+              context,
+              const SnackBar(
+                content: Text('🗑️ Profile photo removed.'),
+                backgroundColor: SoftPalette.amber300,
+              ),
+            );
+          }
+        }
 
         return Dialog(
           backgroundColor: Colors.transparent,
           insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
           child: Container(
-            constraints: const BoxConstraints(maxWidth: 520),
-            padding: const EdgeInsets.all(24),
+            constraints: const BoxConstraints(maxWidth: 440),
+            padding: const EdgeInsets.fromLTRB(22, 18, 22, 22),
             decoration: BoxDecoration(
-              color: SoftPalette.slate900,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.8),
+              color: cardBgColor,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: cardBorderColor,
+                width: 1.0,
+              ),
               boxShadow: [
                 BoxShadow(
-                  color: t.accent.withValues(alpha: 0.25),
-                  blurRadius: 30,
-                  spreadRadius: 2,
+                  color: isDark ? const Color(0x66000000) : const Color(0x14000000),
+                  blurRadius: 24,
+                  offset: const Offset(0, 8),
                 ),
               ],
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Header bar with Title & Close Button
+                // Top Header Bar
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.account_circle_rounded, color: t.accent, size: 22),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'Profile Photo',
-                          style: TextStyle(
-                            color: SoftPalette.gray50,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
+                        Container(
+                          padding: const EdgeInsets.all(7.5),
+                          decoration: BoxDecoration(
+                            color: surfaceCardColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: cardBorderColor),
                           ),
+                          child: Icon(Icons.shield_outlined, color: textPrimaryColor, size: 18),
                         ),
-                      ],
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
-                      onPressed: () => Navigator.pop(dialogCtx),
-                      tooltip: 'Close',
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-
-                // Enlarged Avatar Preview Container (Crystal Clear 320px display)
-                Container(
-                  width: 320,
-                  height: 320,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: SoftPalette.amber300, width: 4.0),
-                    boxShadow: [
-                      BoxShadow(
-                        color: SoftPalette.amber300.withValues(alpha: 0.45),
-                        blurRadius: 24,
-                        spreadRadius: 3,
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: _buildUserHeroAvatar(currentPhoto, userName, t, size: 320),
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // User Name & Role Pill
-                Text(
-                  userName,
-                  style: const TextStyle(
-                    color: SoftPalette.gray50,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: t.accent.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
-                  ),
-                  child: Text(
-                    userRole,
-                    style: TextStyle(
-                      color: t.accent,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-
-                // Audit Trail info badge (Who updated this info last)
-                if (lastUpdatedByName.isNotEmpty || lastUpdatedTime.isNotEmpty) ...[
-                  const SizedBox(height: 14),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: SoftPalette.gray50.withValues(alpha: 0.05),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.1)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Icon(Icons.history_rounded, size: 13, color: SoftPalette.gray50A60),
-                            const SizedBox(width: 4),
                             Text(
-                              'Last Photo Audit',
-                              style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.6), fontSize: 10.5, fontWeight: FontWeight.w700),
+                              'Profile Photo',
+                              style: TextStyle(
+                                color: textPrimaryColor,
+                                fontSize: 16.5,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: -0.2,
+                              ),
+                            ),
+                            Text(
+                              'Executive Identity & Avatar',
+                              style: TextStyle(
+                                color: textSecondaryColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Updated by: ${lastUpdatedByName.isNotEmpty ? lastUpdatedByName : "System"}${lastUpdatedTime.isNotEmpty ? ' ($lastUpdatedTime)' : ''}',
-                          style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.85), fontSize: 11.5, fontWeight: FontWeight.w600),
-                          textAlign: TextAlign.center,
+                      ],
+                    ),
+                    Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: () => Navigator.pop(dialogCtx),
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: surfaceCardColor,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: cardBorderColor),
+                          ),
+                          child: Icon(Icons.close_rounded, size: 18, color: textSecondaryColor),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
+
+                // Solid Tactile Avatar Showcase (zero glow halos / zero sweep gradients)
+                Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 220,
+                      height: 220,
+                      decoration: BoxDecoration(
+                        color: innerSpacerColor,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF3F3F46) : const Color(0xFFCBD5E1),
+                          width: 3.0,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: isDark ? const Color(0x40000000) : const Color(0x10000000),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      padding: const EdgeInsets.all(4.0),
+                      child: ClipOval(
+                        child: _buildDialogAvatarImage(
+                          currentPhoto: currentPhoto,
+                          userName: userName,
+                          t: t,
+                          size: 206,
+                          isDark: isDark,
+                        ),
+                      ),
+                    ),
+
+                    // Solid Floating Camera Action Button
+                    Positioned(
+                      right: 6,
+                      bottom: 6,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: Tooltip(
+                          message: 'Change profile picture',
+                          child: InkWell(
+                            onTap: handlePickPhoto,
+                            borderRadius: BorderRadius.circular(22),
+                            child: Ink(
+                              width: 44,
+                              height: 44,
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF27272A) : Colors.white,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isDark ? const Color(0xFF3F3F46) : const Color(0xFFCBD5E1),
+                                  width: 2.0,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x20000000),
+                                    blurRadius: 6,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Icon(
+                                  Icons.camera_alt_outlined,
+                                  color: textPrimaryColor,
+                                  size: 20,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+
+                // User Name
+                Text(
+                  userName,
+                  style: TextStyle(
+                    color: textPrimaryColor,
+                    fontSize: 21.5,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -0.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 7),
+
+                // Badges Row: Executive Role, Active Status, Branch
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    // Executive Role Pill
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+                      decoration: BoxDecoration(
+                        color: surfaceCardColor,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: cardBorderColor),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.shield_outlined, size: 13, color: textPrimaryColor),
+                          const SizedBox(width: 5),
+                          Text(
+                            userRole,
+                            style: TextStyle(
+                              color: textPrimaryColor,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.6,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Active Status Pill
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF064E3B) : const Color(0xFFDCFCE7),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: isDark ? const Color(0xFF047857) : const Color(0xFF86EFAC),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 6.5,
+                            height: 6.5,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF22C55E),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 5.5),
+                          Text(
+                            'Active',
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF166534),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    // Branch Pill (if available)
+                    if (branchDisplay.isNotEmpty) ...[
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                        decoration: BoxDecoration(
+                          color: surfaceCardColor,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: cardBorderColor),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.location_on_outlined, size: 12, color: textSecondaryColor),
+                            const SizedBox(width: 4),
+                            Text(
+                              branchDisplay,
+                              style: TextStyle(
+                                color: textSecondaryColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+
+                // Optional User Email
+                if (userEmail.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    userEmail,
+                    style: TextStyle(
+                      color: textSecondaryColor,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+
+                // Credential Audit Trail Card
+                if (lastUpdatedByName.isNotEmpty || formattedDate.isNotEmpty) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: surfaceCardColor,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: cardBorderColor,
+                        width: 1.0,
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF18181B) : Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: cardBorderColor),
+                          ),
+                          child: Icon(Icons.verified_user_outlined, size: 20, color: textPrimaryColor),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    'CREDENTIAL AUDIT',
+                                    style: TextStyle(
+                                      color: textSecondaryColor,
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.8,
+                                    ),
+                                  ),
+                                  if (relativeTime.isNotEmpty) ...[
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                      decoration: BoxDecoration(
+                                        color: isDark ? const Color(0xFF18181B) : Colors.white,
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: cardBorderColor),
+                                      ),
+                                      child: Text(
+                                        relativeTime,
+                                        style: TextStyle(
+                                          color: textSecondaryColor,
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              RichText(
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                text: TextSpan(
+                                  children: [
+                                    TextSpan(
+                                      text: 'Updated by ',
+                                      style: TextStyle(
+                                        color: textSecondaryColor,
+                                        fontSize: 11.5,
+                                      ),
+                                    ),
+                                    TextSpan(
+                                      text: lastUpdatedByName.isNotEmpty ? lastUpdatedByName : 'System',
+                                      style: TextStyle(
+                                        color: textPrimaryColor,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (formattedDate.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  formattedDate,
+                                  style: TextStyle(
+                                    color: textSecondaryColor.withValues(alpha: 0.8),
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ],
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 22),
 
-                // Action Buttons Row: Change Photo & Remove Photo
+                // Action Buttons Row: Solid Tactile Buttons
                 Row(
                   children: [
-                    // Change Photo Button
+                    // Primary: Change Photo
                     Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: () async {
-                          final source = await ImageUploadService.showSourceDialog(context, title: 'Choose Profile Photo Source');
-                          if (source == null) return;
-
-                          final newBase64 = await ImageUploadService.pickAndProcessImage(source: source, maxWidth: 512, maxHeight: 512);
-                          if (newBase64 == null || newBase64.isEmpty) return;
-
-                          await _updateUserProfilePhoto(
-                            state: state,
-                            newBase64: newBase64,
-                            action: 'PHOTO_CHANGED',
-                          );
-
-                          setDialogState(() {});
-                          if (dialogCtx.mounted) {
-                            AppToast.showSnackBar(context, 
-                              const SnackBar(
-                                content: Text('✅ Profile photo updated successfully!'),
-                                backgroundColor: SoftPalette.green400,
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: handlePickPhoto,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Ink(
+                            padding: const EdgeInsets.symmetric(vertical: 13),
+                            decoration: BoxDecoration(
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                width: 1.0,
                               ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.photo_camera_rounded, size: 18),
-                        label: const Text('Change Photo'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: t.accent,
-                          foregroundColor: SoftPalette.gray50,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 2,
-                        ),
-                      ),
-                    ),
-                    if (hasPhoto) ...[
-                      const SizedBox(width: 12),
-                      // Remove Photo Button
-                      OutlinedButton.icon(
-                        onPressed: () async {
-                          final confirm = await showDialog<bool>(
-                            context: context,
-                            builder: (confirmCtx) => AlertDialog(
-                              backgroundColor: SoftPalette.slate800,
-                              title: const Text('Remove Profile Photo?', style: TextStyle(color: SoftPalette.gray50)),
-                              content: const Text('Are you sure you want to remove your profile photo?', style: TextStyle(color: SoftPalette.gray50A70)),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(confirmCtx, false),
-                                  child: const Text('Cancel', style: TextStyle(color: SoftPalette.gray50A60)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(
+                                  Icons.photo_camera_outlined,
+                                  size: 18,
+                                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
                                 ),
-                                ElevatedButton(
-                                  onPressed: () => Navigator.pop(confirmCtx, true),
-                                  style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
-                                  child: const Text('Remove', style: TextStyle(color: SoftPalette.gray50)),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Change Photo',
+                                  style: TextStyle(
+                                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2,
+                                  ),
                                 ),
                               ],
                             ),
-                          );
+                          ),
+                        ),
+                      ),
+                    ),
 
-                          if (confirm != true) return;
-
-                          await _updateUserProfilePhoto(
-                            state: state,
-                            newBase64: '',
-                            action: 'PHOTO_REMOVED',
-                          );
-
-                          setDialogState(() {});
-                          if (dialogCtx.mounted) {
-                            AppToast.showSnackBar(context, 
-                              const SnackBar(
-                                content: Text('🗑️ Profile photo removed.'),
-                                backgroundColor: SoftPalette.amber300,
+                    // Secondary: Remove Photo (only if has photo)
+                    if (hasPhoto) ...[
+                      const SizedBox(width: 12),
+                      Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          onTap: handleRemovePhoto,
+                          borderRadius: BorderRadius.circular(10),
+                          child: Ink(
+                            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+                            decoration: BoxDecoration(
+                              color: isDark ? const Color(0xFF271318) : const Color(0xFFFFF1F2),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: SoftPalette.red400.withValues(alpha: isDark ? 0.40 : 0.45),
+                                width: 1.0,
                               ),
-                            );
-                          }
-                        },
-                        icon: const Icon(Icons.delete_outline_rounded, size: 18, color: SoftPalette.red400),
-                        label: const Text('Remove', style: TextStyle(color: SoftPalette.red400)),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: SoftPalette.red400, width: 1.2),
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(Icons.delete_outline_rounded, size: 18, color: SoftPalette.red400),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Remove',
+                                  style: TextStyle(
+                                    color: SoftPalette.red400,
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.2,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -3759,6 +4177,112 @@ Future<void> _showEnlargedAvatarDialog(
           ),
         );
       },
+    ),
+  );
+}
+
+Widget _buildDialogAvatarImage({
+  required String currentPhoto,
+  required String userName,
+  required RoleThemeData t,
+  required double size,
+  bool isDark = true,
+}) {
+  final str = currentPhoto.trim();
+  if (str.isNotEmpty) {
+    final bytes = ImageUploadService.decodeBase64ToBytes(str);
+    if (bytes != null) {
+      return Image.memory(
+        bytes,
+        key: ValueKey('dialog_avatar_${str.hashCode}'),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => _buildDialogFallbackAvatar(
+          userName,
+          t,
+          size,
+          isDark: isDark,
+        ),
+      );
+    }
+    if (str.startsWith('http://') || str.startsWith('https://')) {
+      return Image.network(
+        str,
+        key: ValueKey('dialog_avatar_net_${str.hashCode}'),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => _buildDialogFallbackAvatar(
+          userName,
+          t,
+          size,
+          isDark: isDark,
+        ),
+      );
+    }
+    if (!kIsWeb && File(str).existsSync()) {
+      return Image.file(
+        File(str),
+        key: ValueKey('dialog_avatar_file_${str.hashCode}'),
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => _buildDialogFallbackAvatar(
+          userName,
+          t,
+          size,
+          isDark: isDark,
+        ),
+      );
+    }
+  }
+  return _buildDialogFallbackAvatar(
+    userName,
+    t,
+    size,
+    isDark: isDark,
+  );
+}
+
+Widget _buildDialogFallbackAvatar(
+  String userName,
+  RoleThemeData t,
+  double size, {
+  bool isDark = true,
+}) {
+  final initials = userName.trim().isNotEmpty
+      ? userName
+          .trim()
+          .split(RegExp(r'\s+'))
+          .take(2)
+          .map((e) => e.isNotEmpty ? e[0].toUpperCase() : '')
+          .join()
+      : 'U';
+
+  return Container(
+    width: size,
+    height: size,
+    decoration: BoxDecoration(
+      color: isDark ? const Color(0xFF27272A) : const Color(0xFFE2E8F0),
+      shape: BoxShape.circle,
+    ),
+    child: Center(
+      child: Text(
+        initials,
+        style: TextStyle(
+          color: isDark ? Colors.white : const Color(0xFF0F172A),
+          fontSize: size * 0.36,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 2,
+        ),
+      ),
     ),
   );
 }
@@ -3793,6 +4317,7 @@ Future<void> _updateUserProfilePhoto({
   state.widget.userData['photoUpdatedByName'] = updaterName;
   state.widget.userData['photoUpdatedByEmail'] = updaterEmail;
 
+  state._updateCachedUserData();
   state.refresh();
 
   // 3. Save locally in Hive & Offline Secure Credentials Cache
@@ -3888,6 +4413,7 @@ Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {
         str.isNotEmpty &&
         !str.startsWith('http://') &&
         !str.startsWith('https://') &&
+        !kIsWeb &&
         File(str).existsSync();
   }
   // Decode at display size, not the photo's native resolution.

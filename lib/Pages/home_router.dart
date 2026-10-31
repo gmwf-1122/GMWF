@@ -55,6 +55,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:bitsdojo_window/bitsdojo_window.dart';
 import '../theme/role_theme_provider.dart';
+import '../services/firebase_session_guard.dart';
 
 
 class HomeRouter extends StatefulWidget {
@@ -109,6 +110,8 @@ class _HomeRouterState extends State<HomeRouter> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final userData = await _userDataFuture;
       if (mounted && userData != null) {
+        // Uploads need a Firebase session; restore it whenever it is missing.
+        if (!kIsWeb) FirebaseSessionGuard.start();
         final role = (userData['role'] ?? '').toString().toLowerCase();
         final isServerMode = role == 'server';
         UpdateDialogWidget.showUpdateDialogIfNeeded(context, isServerMode: isServerMode);
@@ -285,6 +288,8 @@ class _HomeRouterState extends State<HomeRouter> {
           .timeout(const Duration(milliseconds: 150));
       if (connectivityResult.every((r) => r == ConnectivityResult.none)) return false;
     } catch (_) {}
+    // InternetAddress.lookup throws on web, which made this always false there.
+    if (kIsWeb) return true;
     try {
       final lookup = await InternetAddress.lookup('google.com').timeout(const Duration(milliseconds: 250));
       if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;

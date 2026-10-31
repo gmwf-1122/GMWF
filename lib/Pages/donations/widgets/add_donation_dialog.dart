@@ -96,6 +96,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
   }
 
   Future<void> _submit() async {
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     if (!_isAnonymous && _nameCtrl.text.trim().isEmpty) {
       setState(() => _error = 'Donor name is required.');
