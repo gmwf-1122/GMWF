@@ -6,10 +6,12 @@ import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/quota_service.dart';
 import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:gmwf/services/cloud/lan_firestore_gate.dart';
+import 'package:gmwf/services/cloud/sync_log.dart';
 import 'package:crypto/crypto.dart';
 import 'package:collection/collection.dart' show DeepCollectionEquality;
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -808,6 +810,7 @@ class LocalStorageService {
     'realtime_entity_versions',
     'realtime_outbox',
     'realtime_failed_outbox',
+    'realtime_outbox_meta',
     'local_submissions',
     'server_sync_queue',
     'local_edit_requests',
@@ -940,6 +943,7 @@ class LocalStorageService {
   /// Isolate-safe and concurrency-safe method to ensure a Hive box is open.
   /// Uses Completer mutex lock so concurrent calls for the same box do not race.
   static Future<Box<T>> ensureBoxOpen<T>(String name) async {
+    await _waitForQueueRepair(name);
     markBoxAccessed(name);
     if (Hive.isBoxOpen(name)) {
       return _getOpenBoxSafely<T>(name);
@@ -974,6 +978,7 @@ class LocalStorageService {
   }
 
   static Future<Box<T>> openBoxSafe<T>(String name) async {
+    await _waitForQueueRepair(name);
     markBoxAccessed(name);
     // Opening reads and decodes the whole box file on the UI thread.
     if (!Hive.isBoxOpen(name)) UiStallMonitor.mark('open box $name');
@@ -1338,6 +1343,55 @@ class LocalStorageService {
     }
   }
 
+  // ── Oversized LAN queues ──────────────────────────────────────────────────
+  // realtime_outbox.hive reached 1.5 GB on a Karachi PC (every flush re-put each queued item
+  // with its full payload). Opening it decoded the whole file on the UI thread: 35–70 s
+  // frozen at every start. A queue file over [_queueRepairThresholdBytes] is rebuilt in a
+  // background isolate before anything opens it; openers wait for that, the start-up loops
+  // skip it, and the LAN outbox buffers new messages in memory meanwhile.
+  static const int _queueRepairThresholdBytes = 50 * 1024 * 1024;
+  static const List<String> _repairableQueues = ['realtime_outbox', 'realtime_failed_outbox'];
+  static final Map<String, Future<void>> _queueRepairs = {};
+
+  static bool isBoxUnderRepair(String name) => _queueRepairs.containsKey(name);
+
+  /// Call once after Hive is initialised and before any box is opened (main.dart).
+  static void startOversizedQueueRepairs() {
+    final dir = _hiveDirPath;
+    if (kIsWeb || dir == null || dir.isEmpty) return;
+    for (final name in _repairableQueues) {
+      try {
+        final f = File(p.join(dir, '$name.hive'));
+        if (!f.existsSync() || f.lengthSync() < _queueRepairThresholdBytes) continue;
+        _queueRepairs[name] = _repairQueue(dir, name, f.lengthSync());
+      } catch (e) {
+        debugPrint('[LocalStorageService] Queue size check for $name failed: $e');
+      }
+    }
+  }
+
+  static Future<void> _repairQueue(String dir, String name, int sizeBytes) async {
+    final started = DateTime.now();
+    SyncLog.write('$name is ${sizeBytes ~/ (1024 * 1024)} MB: rebuilding it in the background');
+    try {
+      final stats = await Isolate.run(() => RealtimeManager.rebuildQueueFile(dir, name));
+      SyncLog.write('$name rebuilt in ${DateTime.now().difference(started).inSeconds} s: '
+          '${stats['beforeCount']} -> ${stats['afterCount']} items, '
+          '${(stats['beforeBytes'] ?? 0) ~/ (1024 * 1024)} MB -> ${(stats['afterBytes'] ?? 0) ~/ 1024} KB');
+    } catch (e, st) {
+      // The original file is untouched; it opens as before (slowly).
+      SyncLog.write('$name rebuild failed, opening it as it is: $e');
+      await _logStorageError(name, 'Queue rebuild failed: $e', st);
+    } finally {
+      _queueRepairs.remove(name);
+    }
+  }
+
+  static Future<void> _waitForQueueRepair(String name) async {
+    final repair = _queueRepairs[name];
+    if (repair != null) await repair;
+  }
+
   /// Startup housekeeping: trims every box's backups to the newest [_maxBackupsPerBox].
   static Future<void> pruneAllBoxBackups() async {
     try {
@@ -1451,7 +1505,7 @@ class LocalStorageService {
     'app_settings', 'app_flags', usersBox, 'local_user_module_access', syncBox, notificationsBox,
     deadLetterQueueBox, 'issued_token_keys', branchCacheBox, branchesBox, financeSettingsBox,
     syncMetaBox, 'server_record_versions', 'realtime_entity_versions', 'realtime_outbox',
-    'realtime_failed_outbox', 'local_submissions', 'server_sync_queue', 'local_edit_requests',
+    'realtime_failed_outbox', 'realtime_outbox_meta', 'local_submissions', 'server_sync_queue', 'local_edit_requests',
     'branch_servers', 'sync_failures', 'inventory_sync_failures', 'local', biometricDevicesBox,
     restockRequestsBox, // small; request guards must see it after a restart
   };
@@ -1807,7 +1861,7 @@ class LocalStorageService {
   }
 
   static Future<void> _openBoxesInBatches(Iterable<String> names) async {
-    final boxNames = names.where((n) => !Hive.isBoxOpen(n)).toList();
+    final boxNames = names.where((n) => !Hive.isBoxOpen(n) && !isBoxUnderRepair(n)).toList();
     debugPrint('[LocalStorageService] Opening ${boxNames.length} Hive boxes in parallel batches...');
 
     // Tell the user what's happening (only when there's real work, so repeat calls don't flash).
@@ -1858,6 +1912,7 @@ class LocalStorageService {
       if (scope != null) ...scope.where((n) => !coreBoxNames.contains(n)),
     ];
     for (final name in firstBoxes) {
+      if (isBoxUnderRepair(name)) continue; // opened when its background rebuild is done
       try {
         await ensureBoxOpen(name);
       } catch (e) {

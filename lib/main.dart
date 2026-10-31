@@ -261,6 +261,9 @@ Future<void> main() async {
           await Hive.initFlutter();
         }
         Hive.registerAdapter(TimestampAdapter());
+        // Before any box opens: a LAN queue file that grew huge is rebuilt in the background
+        // instead of being decoded on the UI thread (35–70 s frozen at start on a Karachi PC).
+        LocalStorageService.startOversizedQueueRepairs();
 
         try {
           await Hive.openBox('app_settings');

@@ -215,8 +215,13 @@ class LanServer {
   // ── [LIVENESS] Evict dead sockets that have gone silent ─────────────────────
   void _startHeartbeatChecker() {
     _heartbeatTimer?.cancel();
+    var lastTick = DateTime.now();
     _heartbeatTimer = Timer.periodic(const Duration(seconds: 20), (_) {
       final now = DateTime.now();
+      // A late tick means this server's UI thread was frozen: the desks' pings from that time
+      // are still queued, so silence is not evidence of a dead desk. Evict on the next tick.
+      final lateTick = now.difference(lastTick) > const Duration(seconds: 40);
+      lastTick = now;
       final deadSockets = <WebSocket>[];
       for (final client in List<WebSocket>.from(_clients)) {
         if (client.readyState != WebSocket.open) {
@@ -239,7 +244,7 @@ class LanServer {
           // Desks ping every 10 s. A socket silent for 60 s is dead (Wi-Fi drop leaves it
           // half-open); at 120 s every broadcast in between went into it and was lost. Not
           // lower: a server busy for a while (big scans) must not evict every desk at once.
-          if (now.difference(lastActive) > const Duration(seconds: 60)) {
+          if (!lateTick && now.difference(lastActive) > const Duration(seconds: 60)) {
             deadSockets.add(client);
           }
         }

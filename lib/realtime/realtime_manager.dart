@@ -55,8 +55,10 @@
 import 'package:gmwf/utils/ui_stall_monitor.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show File, Platform;
 
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, ValueNotifier, VoidCallback, debugPrint;
+import 'package:cloud_firestore/cloud_firestore.dart' show Timestamp;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -85,6 +87,7 @@ class RealtimeManager {
   bool _serverIdentified = false;
   bool _flushedOnConnect = false; // [BUG-4] guard against double outbox flush
   bool _outboxFlushing = false; // one _flushOutbox pass at a time
+  DateTime? _lastPingTick; // to spot ping ticks delayed by a frozen UI thread
   Future<void> _routeChain = Future<void>.value(); // incoming messages are routed one at a time
   bool _stressPurgeDone = false; // the stress-test sweep scans every entry: once per app run
 
@@ -208,15 +211,167 @@ class RealtimeManager {
   }
 
   static Future<void> initOutbox() async {
+    await LocalStorageService.openBoxSafe(_outboxMetaBox);
+    // An oversized queue is being rebuilt in a background isolate (startup); it opens when
+    // that is done, without holding up the rest of start-up.
+    final underRepair = LocalStorageService.isBoxUnderRepair(_outboxBox) ||
+        LocalStorageService.isBoxUnderRepair(_failedOutboxBox);
+    if (underRepair) {
+      unawaited(() async {
+        try {
+          await LocalStorageService.openBoxSafe(_outboxBox);
+          await LocalStorageService.openBoxSafe(_failedOutboxBox);
+          await RealtimeManager()._writeDeferredOutbox();
+        } catch (e) {
+          debugPrint('[RealtimeManager] Opening repaired outbox failed: $e');
+        }
+      }());
+      return;
+    }
     await LocalStorageService.openBoxSafe(_outboxBox);
     await LocalStorageService.openBoxSafe(_failedOutboxBox); // [FAIL-BOX]
+  }
+
+  // ── Outbox send/retry counters ────────────────────────────────────────────
+  // Kept in their own small box. They used to be written into the outbox item itself, which
+  // re-put the whole payload (patient, prescription, ...) on every flush: every 30 s for every
+  // queued item, the main reason realtime_outbox.hive reached 1.5 GB on a Karachi PC.
+  static const _outboxMetaBox = 'realtime_outbox_meta';
+  final Map<String, int> _outboxCountersMem = {};
+
+  int _outboxCounter(String kind, dynamic key, Object? legacy) {
+    final k = '$kind|$key';
+    final mem = _outboxCountersMem[k];
+    if (mem != null) return mem;
+    try {
+      if (Hive.isBoxOpen(_outboxMetaBox)) {
+        final v = Hive.box(_outboxMetaBox).get(k);
+        if (v is int) return v;
+      }
+    } catch (_) {}
+    return legacy is int ? legacy : 0;
+  }
+
+  void _setOutboxCounter(String kind, dynamic key, int value) {
+    final k = '$kind|$key';
+    _outboxCountersMem[k] = value;
+    try {
+      if (Hive.isBoxOpen(_outboxMetaBox)) Hive.box(_outboxMetaBox).put(k, value);
+    } catch (_) {}
+  }
+
+  void _clearOutboxCounters(dynamic key) {
+    if (key == null) return;
+    for (final kind in const ['s', 'r']) {
+      final k = '$kind|$key';
+      _outboxCountersMem.remove(k);
+      try {
+        if (Hive.isBoxOpen(_outboxMetaBox)) Hive.box(_outboxMetaBox).delete(k);
+      } catch (_) {}
+    }
+  }
+
+  // ── Writes made while the outbox is being repaired ────────────────────────
+  final Map<String, Map<String, dynamic>> _deferredOutbox = {};
+
+  Future<void> _writeDeferredOutbox() async {
+    if (_deferredOutbox.isEmpty || !Hive.isBoxOpen(_outboxBox)) return;
+    final pending = Map<String, Map<String, dynamic>>.from(_deferredOutbox);
+    _deferredOutbox.clear();
+    await Hive.box(_outboxBox).putAll(pending);
+  }
+
+  /// Rebuilds an oversized outbox file (runs in a background isolate, before the app opens the
+  /// box). Keeps the newest queued copy of each record, flattens nested prescriptions, drops
+  /// stale non-critical items (same rules as [_flushOutbox]) and leaves tokens, prescriptions,
+  /// dispenses, patients, donations and employees in place however old. On any error the
+  /// original file is left untouched. Returns before/after counts and sizes.
+  static Future<Map<String, int>> rebuildQueueFile(String dir, String name) async {
+    Hive.init(dir);
+    if (!Hive.isAdapterRegistered(100)) Hive.registerAdapter(_RepairTimestampAdapter());
+    final file = File('$dir${Platform.pathSeparator}$name.hive');
+    final tmpName = '${name}_rebuild';
+    final tmpFile = File('$dir${Platform.pathSeparator}$tmpName.hive');
+    final beforeBytes = file.lengthSync();
+    if (tmpFile.existsSync()) tmpFile.deleteSync(); // left over from an interrupted run
+
+    final src = await Hive.openBox(name);
+    final out = await Hive.openBox(tmpName);
+    final beforeCount = src.length;
+    var kept = 0;
+    try {
+      final now = DateTime.now();
+      final today = '${now.day.toString().padLeft(2, '0')}${now.month.toString().padLeft(2, '0')}'
+          '${(now.year % 100).toString().padLeft(2, '0')}';
+      final cutoff = now.subtract(const Duration(hours: 12));
+
+      final latest = <String, ({dynamic key, String ts})>{};
+      for (final key in src.keys) {
+        final raw = src.get(key);
+        if (raw is! Map) continue;
+        final lk = _logicalKey(raw);
+        if (lk == null) continue;
+        final ts = (raw['_outboxTimestamp'] ?? raw['createdAt'] ?? '').toString();
+        final cur = latest[lk];
+        if (cur == null || ts.compareTo(cur.ts) >= 0) latest[lk] = (key: key, ts: ts);
+      }
+
+      final batch = <dynamic, dynamic>{};
+      for (final key in src.keys) {
+        final raw = src.get(key);
+        if (raw is! Map) continue;
+        final lk = _logicalKey(raw);
+        if (lk != null && latest[lk]?.key != key) continue; // an older copy of the same record
+        final item = Map<String, dynamic>.from(raw.map((k, v) => MapEntry(k.toString(), v)));
+        if (!_isCriticalOutboxItem(item)) {
+          final dk = (item['dateKey'] ?? (item['data'] is Map ? item['data']['dateKey'] : null))?.toString().trim();
+          final ts = DateTime.tryParse((item['_outboxTimestamp'] ?? item['createdAt'] ?? item['_failedAt'] ?? '').toString());
+          final stale = (dk != null && dk.isNotEmpty && dk != today) ||
+              (ts != null && (ts.isBefore(cutoff) || ts.day != now.day));
+          if (stale) continue;
+        }
+        LocalStorageService.flattenEmbeddedPrescription(item);
+        if (item['data'] is Map) {
+          final data = Map<String, dynamic>.from((item['data'] as Map).map((k, v) => MapEntry(k.toString(), v)));
+          LocalStorageService.flattenEmbeddedPrescription(data);
+          item['data'] = data;
+        }
+        item.remove('_outboxSends');
+        item.remove('_outboxRetryCount');
+        batch[key] = item;
+        kept++;
+        if (batch.length >= 200) {
+          await out.putAll(batch);
+          batch.clear();
+        }
+      }
+      if (batch.isNotEmpty) await out.putAll(batch);
+      await out.flush();
+    } catch (e) {
+      await src.close();
+      await out.deleteFromDisk();
+      rethrow;
+    }
+    await src.close();
+    await out.close();
+    file.deleteSync();
+    tmpFile.renameSync(file.path);
+    for (final lock in [File('$dir${Platform.pathSeparator}$tmpName.lock')]) {
+      if (lock.existsSync()) lock.deleteSync();
+    }
+    return {
+      'beforeCount': beforeCount,
+      'afterCount': kept,
+      'beforeBytes': beforeBytes,
+      'afterBytes': file.lengthSync(),
+    };
   }
 
   /// Manually force-flushes the Hive outbox and requests catch-up from LAN server.
   /// Used by UI Sync buttons to force any stuck token or prescription to the next user.
   Future<void> forceFlushAndCatchUp() async {
     try {
-      _retryFailedOutbox();
+      _retryFailedOutbox(force: true);
       _sendPendingMessages();
       await _flushOutbox();
       if (_isConnected && _serverIdentified) {
@@ -368,12 +523,25 @@ class RealtimeManager {
       // Handshake watchdog: if the server never identifies us (stale IP, wrong
       // device on that IP, firewall dropping SYN) give up quickly so the
       // reconnect/rediscovery logic can run instead of sitting in SYN_SENT.
-      Timer(const Duration(seconds: 6), () {
+      final armedAt = DateTime.now();
+      void watchdog() {
         if (gen != _connectGen) return;
         if (_serverIdentified) return;
+        // Fired late because the UI thread was frozen: the server's reply may be queued
+        // behind this timer. Look again shortly instead of dropping the attempt.
+        if (DateTime.now().difference(armedAt).inSeconds > 10 &&
+            DateTime.now().difference(armedAt).inSeconds < 60) {
+          Timer(const Duration(seconds: 3), () {
+            if (gen != _connectGen || _serverIdentified) return;
+            debugPrint('[RealtimeManager] ⏱️ Handshake watchdog: still no identify from $wsUrl → reconnect');
+            _handleDisconnect();
+          });
+          return;
+        }
         debugPrint('[RealtimeManager] ⏱️ Handshake watchdog: no identify from $wsUrl in 6s → reconnect');
         _handleDisconnect();
-      });
+      }
+      Timer(const Duration(seconds: 6), watchdog);
 
       if (kIsWeb) {
         try {
@@ -421,7 +589,7 @@ class RealtimeManager {
       _schedulePendingFallback();
 
       // [FAIL-BOX] On new connection, move failed messages back to main outbox.
-      _retryFailedOutbox();
+      _retryFailedOutbox(force: true);
 
     } catch (e) {
       if (kDebugMode) print('[RealtimeManager] Connect failed: $e');
@@ -587,7 +755,7 @@ class RealtimeManager {
   final Map<String, String> _outboxLogical = {};
 
   /// Identity of the business record a message carries, e.g. "save_entry|091026-SADD-074".
-  String? _logicalKey(Map<dynamic, dynamic> m) {
+  static String? _logicalKey(Map<dynamic, dynamic> m) {
     final type = (m['event_type'] ?? m['type'])?.toString() ?? '';
     if (type.isEmpty) return null;
     final data = m['data'] is Map ? m['data'] as Map : const {};
@@ -599,6 +767,8 @@ class RealtimeManager {
 
   // ── Remove outbox entry by messageId (called on server ACK) ──────────────
   void _removeFromOutboxByMessageId(String messageId) {
+    _deferredOutbox.remove(messageId);
+    _clearOutboxCounters(messageId);
     try {
       final box = Hive.box(_outboxBox);
       // The outbox key IS the message id (see sendMessage), so this is O(1). The old code scanned
@@ -724,14 +894,21 @@ class RealtimeManager {
   // ── Ping / pong ────────────────────────────────────────────────────────────
   void _startPingTimer() {
     _pingTimer?.cancel();
+    _lastPingTick = DateTime.now();
     _pingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (!_isConnected || _channel == null) return;
       final now = DateTime.now();
+      // This tick came late: the UI thread was frozen (Haji Camp logs: 12–64 s while the
+      // receptionist list rebuilt or boxes opened). The server's pongs from that time are still
+      // queued behind this timer, so "no pong for 30 s" would drop a healthy link and start a
+      // reconnect plus a full catch-up, which froze the desk again. Judge it on the next tick.
+      final lateTick = now.difference(_lastPingTick ?? now).inSeconds > 20;
+      _lastPingTick = now;
       // No pong for 30 s → treat the socket as dead. (It was 14 s: whenever the server's UI
       // thread was busy for a moment, every client dropped and reconnected at once, and each
       // reconnect asked for a full catch-up, which made the server even busier. 45 s then left
       // a dead link looking alive for most of a minute; the server's long scans now yield.)
-      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 30) {
+      if (!lateTick && _lastPong != null && now.difference(_lastPong!).inSeconds > 30) {
         debugPrint('[RealtimeManager] ⚠️ Pong timeout (>30s) → tearing down half-dead socket');
         _recordHealthFailure();
         _handleDisconnect();
@@ -937,6 +1114,9 @@ class RealtimeManager {
             _pendingMessages.removeWhere((m) => _logicalKey(m) == logical);
           }
           Hive.box(_outboxBox).put(outboxKey, outboxEntry);
+        } else if (LocalStorageService.isBoxUnderRepair(_outboxBox)) {
+          // Written once the repaired outbox opens (see initOutbox).
+          _deferredOutbox[outboxKey] = outboxEntry;
         }
       } catch (e) {
         if (kDebugMode) print('[RealtimeManager] Outbox write failed: $e');
@@ -1073,7 +1253,7 @@ class RealtimeManager {
         final msg = Map<String, dynamic>.from(item);
         msg.remove('_outboxKey');
         msg.remove('_outboxTimestamp');
-        final retryCount = (msg.remove('_outboxRetryCount') as int?) ?? 0;
+        final retryCount = _outboxCounter('r', key, msg.remove('_outboxRetryCount'));
         msg.remove('_outboxSends');
         // Not marked _resent/_isReplay: the server forwards a resend only when it never handled
         // the first copy (duplicates are ACKed and dropped there), so for the other desks it is
@@ -1096,13 +1276,12 @@ class RealtimeManager {
           if (!hasAckId) {
             toDelete.add(key);
           } else {
-            final sends = ((item['_outboxSends'] as int?) ?? 0) + 1;
+            final sends = _outboxCounter('s', key, item['_outboxSends']) + 1;
             if (sends >= _maxUnackedSends) {
               _moveToFailedOutbox(key, item, reason: 'no server acknowledgement after $sends sends');
               toDelete.add(key);
             } else {
-              item['_outboxSends'] = sends;
-              try { box.put(key, item); } catch (_) {}
+              _setOutboxCounter('s', key, sends);
             }
           }
           await Future.delayed(const Duration(milliseconds: 20));
@@ -1115,9 +1294,8 @@ class RealtimeManager {
             _moveToFailedOutbox(key, item, reason: e.toString());
             toDelete.add(key);
           } else {
-            // Update retry count in outbox and stop flushing (channel is down).
-            item['_outboxRetryCount'] = newRetryCount;
-            try { box.put(key, item); } catch (_) {}
+            // Update retry count and stop flushing (channel is down).
+            _setOutboxCounter('r', key, newRetryCount);
           }
           break; // Channel is broken; stop the loop.
         }
@@ -1125,7 +1303,10 @@ class RealtimeManager {
 
       for (final k in toDelete) {
         try { box.delete(k); } catch (_) {}
+        _clearOutboxCounters(k);
       }
+      // Hive only appends; after a big clean-up the dead records stay in the file until compacted.
+      if (toDelete.length >= 100) unawaited(box.compact().catchError((Object _) {}));
 
       if (kDebugMode) {
         print('[RealtimeManager] Outbox flush done. Cleared: ${toDelete.length}, remaining: ${box.length}');
@@ -1159,8 +1340,14 @@ class RealtimeManager {
     try {
       if (!Hive.isBoxOpen(_failedOutboxBox)) return;
       final failedBox = Hive.box(_failedOutboxBox);
-      final failedKey = 'failed_${DateTime.now().microsecondsSinceEpoch}';
+      // Keyed by the message id: an item that fails again overwrites its earlier copy instead of
+      // adding another full one (every move used to append a new record to the file).
+      final msgId = (item['_messageId'] ?? '').toString();
+      final failedKey = msgId.isNotEmpty ? 'failed_$msgId' : 'failed_${DateTime.now().microsecondsSinceEpoch}';
       final failedEntry = Map<String, dynamic>.from(item);
+      failedEntry.remove('_outboxSends');
+      failedEntry.remove('_outboxRetryCount');
+      _clearOutboxCounters(originalKey);
       failedEntry['_failedAt']     = DateTime.now().toIso8601String();
       failedEntry['_failReason']   = reason?.substring(0, reason.length.clamp(0, 300));
       failedEntry['_originalKey']  = originalKey?.toString();
@@ -1176,7 +1363,17 @@ class RealtimeManager {
   }
 
   // ── [FAIL-BOX] Retry failed outbox on new connection ──────────────────────
-  void _retryFailedOutbox() {
+  // The 30 s sweep retries at most every 5 minutes: each retry moves every failed item (full
+  // payload) into the outbox and back after 20 more sends, which rewrote both files nonstop on
+  // a desk whose server never ACKed. A new connection or a manual sync retries at once.
+  DateTime? _lastFailedRetryAt;
+
+  void _retryFailedOutbox({bool force = false}) {
+    final now = DateTime.now();
+    if (!force && _lastFailedRetryAt != null && now.difference(_lastFailedRetryAt!) < const Duration(minutes: 5)) {
+      return;
+    }
+    _lastFailedRetryAt = now;
     try {
       if (!Hive.isBoxOpen(_failedOutboxBox) || !Hive.isBoxOpen(_outboxBox)) return;
       final failedBox = Hive.box(_failedOutboxBox);
@@ -1212,14 +1409,15 @@ class RealtimeManager {
         item.remove('_failedAt');
         item.remove('_failReason');
         item.remove('_originalKey');
-        item['_outboxRetryCount'] = 0;
-        item['_outboxSends'] = 0;
+        item.remove('_outboxRetryCount');
+        item.remove('_outboxSends');
         item['_outboxTimestamp']  = item['_outboxTimestamp'] ?? DateTime.now().toIso8601String();
         // Keyed by its message id again, so the server's ACK finds and removes it (a generated
         // key was missed by the ACK lookup, and the item bounced between the boxes forever).
         final msgId = (item['_messageId'] ?? '').toString();
         final newKey = msgId.isNotEmpty ? msgId : 'outbox_retry_${DateTime.now().microsecondsSinceEpoch}';
         item['_outboxKey'] = newKey;
+        _clearOutboxCounters(newKey);
         box.put(newKey, item);
         failedBox.delete(key);
         moved++;
@@ -1440,5 +1638,25 @@ class RealtimeManager {
     _pendingAckSerials.clear();
 
     if (kDebugMode) print('[RealtimeManager] Disposed');
+  }
+}
+
+/// Reads Firestore Timestamps (typeId 100, as registered in main.dart) inside the outbox
+/// repair isolate, which has its own Hive registry.
+class _RepairTimestampAdapter extends TypeAdapter<Timestamp> {
+  @override
+  final int typeId = 100;
+
+  @override
+  Timestamp read(BinaryReader reader) {
+    final seconds = reader.readInt();
+    final nanoseconds = reader.readInt();
+    return Timestamp(seconds, nanoseconds);
+  }
+
+  @override
+  void write(BinaryWriter writer, Timestamp obj) {
+    writer.writeInt(obj.seconds);
+    writer.writeInt(obj.nanoseconds);
   }
 }

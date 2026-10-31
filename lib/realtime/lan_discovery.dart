@@ -8,6 +8,7 @@ import 'dart:io';
 
 import 'package:bonsoir/bonsoir.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show MissingPluginException;
 
 import '../config/constants.dart';
 import '../utils/network_utils.dart';
@@ -42,7 +43,12 @@ class LanDiscovery {
     return completer.future;
   }
 
+  /// Set once the mDNS plugin turns out to be missing (Windows builds): later discovery rounds
+  /// skip it instead of failing again every few seconds while a desk looks for the server.
+  static bool _mdnsUnavailable = false;
+
   static Future<void> _tryMdns(Completer<DiscoveredServer?> c, void Function(String)? s) async {
+    if (_mdnsUnavailable) return;
     try {
       final d = BonsoirDiscovery(type: '_gmwftoken._tcp');
       // bonsoir 6 requires initialize() before start(); without it every discovery round
@@ -65,12 +71,14 @@ class LanDiscovery {
         // No mDNS plugin on this platform (MissingPluginException on Windows): UDP and the
         // subnet scan still find the server. Unhandled, this filled gmwf_crash.log.
         debugPrint('mDNS unavailable: $e');
+        if (e is MissingPluginException) _mdnsUnavailable = true;
       }, cancelOnError: true);
       Future.delayed(const Duration(seconds: 8), () {
         try { d.stop(); } catch (_) {}
       });
     } catch (e) {
       debugPrint('mDNS error: $e');
+      if (e is MissingPluginException) _mdnsUnavailable = true;
     }
   }
 
