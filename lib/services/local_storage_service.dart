@@ -1252,8 +1252,7 @@ class LocalStorageService {
   // 120 KB per token), all decoded on the UI thread at startup and sent in every catch-up.
 
   static bool _hasRxContent(Map m) {
-    final meds = m['medicines'] ?? m['prescriptions'] ?? m['items'];
-    return (meds is List && meds.isNotEmpty) ||
+    return _medicinesOf(m) != null ||
         (m['diagnosis'] != null && m['diagnosis'].toString().trim().isNotEmpty) ||
         (m['complaints'] != null && m['complaints'].toString().trim().isNotEmpty) ||
         (m['complaint'] != null && m['complaint'].toString().trim().isNotEmpty) ||
@@ -1266,16 +1265,41 @@ class LocalStorageService {
   static Map<String, dynamic> prescriptionForEmbedding(Map source) {
     var cur = Map<String, dynamic>.from(source);
     var guard = 0;
-    while (cur['prescription'] is Map && !_hasRxContent(cur) && guard++ < 32) {
-      cur = Map<String, dynamic>.from(cur['prescription'] as Map);
+    // Unwrap while the outer map has no medicines of its own. A wrapper that only carries a
+    // diagnosis (SyncService's save_prescription replay sends one, with the real prescription
+    // nested inside) used to stop the unwrapping, and the nested copy that held the medicines
+    // was then dropped: the dispenser saw the diagnosis and no medicines.
+    while (cur['prescription'] is Map && !_hasMedicines(cur) && guard++ < 32) {
+      final inner = Map<String, dynamic>.from(cur['prescription'] as Map);
+      if (!_hasMedicines(inner) && _hasRxContent(cur)) break; // neither has medicines: keep the outer
+      // The wrapper's own fields (diagnosis, times, doctor) fill gaps in the nested copy.
+      cur.forEach((k, v) {
+        if (k != 'prescription' && v != null && inner[k] == null) inner[k] = v;
+      });
+      cur = inner;
     }
     cur.remove('prescription');
-    final meds = cur['medicines'] ?? cur['prescriptions'] ?? cur['items'];
-    if (meds is List) {
-      cur['medicines'] ??= meds;
-      cur['prescriptions'] ??= meds;
+    final meds = _medicinesOf(cur);
+    if (meds != null) {
+      // An empty 'medicines' list must not mask a filled 'prescriptions' one (or the reverse).
+      if (!_hasNonEmptyList(cur['medicines'])) cur['medicines'] = meds;
+      if (!_hasNonEmptyList(cur['prescriptions'])) cur['prescriptions'] = meds;
     }
     return cur;
+  }
+
+  static bool _hasNonEmptyList(Object? v) => v is List && v.isNotEmpty;
+
+  static bool _hasMedicines(Map m) => _medicinesOf(m) != null;
+
+  /// The first non-empty medicine list of a prescription map ('medicines', 'prescriptions'
+  /// or 'items'), or null. `a ?? b` picked an empty list over a filled one.
+  static List? _medicinesOf(Map m) {
+    for (final k in const ['medicines', 'prescriptions', 'items']) {
+      final v = m[k];
+      if (v is List && v.isNotEmpty) return v;
+    }
+    return null;
   }
 
   /// Flattens `map['prescription']` in place. True when something was removed.
